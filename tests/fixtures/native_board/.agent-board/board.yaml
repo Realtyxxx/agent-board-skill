@@ -1,0 +1,39 @@
+version: 1
+board:
+  name: demo-native
+  title: "退款链路重构与验证"
+  status: active
+
+lanes:
+  - id: impl-a
+    label: "实现席位 A"
+    role: worker
+    runtime: claude
+  - id: reviewer
+    label: "代码评审席位"
+    role: reviewer
+    runtime: codex
+  - id: newbie
+    label: "新注册席位"
+    role: worker
+    runtime: claude
+
+tasks:
+  - id: T001
+    title: "改造退款状态机核心"
+    status: done
+    owner: impl-a
+    tags: [refund, core]
+    detail: |
+      实现退款状态机核心流转逻辑。
+    detail_file: notes/T001.md
+  - id: T002
+    title: "交易表分区优化"
+    status: doing
+    owner: impl-a
+    tags: [db, perf]
+  - id: T003
+    title: "未派工待办卡片"
+    status: todo
+    owner: null
+    tags: [backlog]

@@ -1,0 +1,8 @@
+id: T004
+title: "支付网关集成"
+status: blocked
+owner: impl-a
+parent: T001
+blocker: T002
+blocked_since: 1756366800
+tags: [payment, gateway]

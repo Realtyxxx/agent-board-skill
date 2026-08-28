@@ -1,0 +1,5 @@
+leader	lead	claude	sess-lead	/workspace	%0	active
+worker	impl-a	claude	sess-a	/workspace	%1	active
+worker	reviewer	codex	sess-r	/workspace	%2	active
+worker	impl-b	agy	sess-b	/workspace	%3	active
+worker	newbie	claude	sess-n	/workspace	%4	active

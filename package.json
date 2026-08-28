@@ -1,0 +1,28 @@
+{
+  "name": "agent-board-skill",
+  "version": "1.0.0",
+  "description": "Universal multi-agent task and state kanban board with pure Python stdlib MiniYAML and read-only sandbox isolation",
+  "main": "board/serve.py",
+  "bin": {
+    "agent-board-install": "bin/install.js"
+  },
+  "scripts": {
+    "test": "bash tests/miniyaml.sh && bash tests/native-adapter.sh && bash tests/teams-adapter.sh && bash tests/board-sandbox.sh",
+    "test:miniyaml": "bash tests/miniyaml.sh",
+    "test:native": "bash tests/native-adapter.sh",
+    "test:teams": "bash tests/teams-adapter.sh",
+    "test:sandbox": "bash tests/board-sandbox.sh",
+    "install-skill": "node bin/install.js --force"
+  },
+  "keywords": [
+    "agent",
+    "kanban",
+    "board",
+    "tmux",
+    "multi-agent",
+    "sandbox",
+    "miniyaml"
+  ],
+  "author": "Realtyxxx",
+  "license": "MIT"
+}

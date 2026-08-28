@@ -1,0 +1,9 @@
+id: T005
+title: "改造退款回滚路径"
+status: done
+owner: impl-a
+parent: T001
+tags: [refund, hot]
+detail: |
+  改造退款状态机，增加回滚补偿路径。
+detail_file: notes/T005.md

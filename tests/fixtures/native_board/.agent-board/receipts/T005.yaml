@@ -1,0 +1,9 @@
+agent_board_receipt_v1:
+  task: T005
+  worker: impl-a
+  status: completed
+  verdict: pass
+  next: verify
+  blocker: none
+  artifact: artifacts/T005.md
+  summary: "退款回滚补偿已实现"

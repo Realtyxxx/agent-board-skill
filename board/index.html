@@ -1,0 +1,2672 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>tmux-agent-teams · Team 看板</title>
+    <style>
+      /* ============ tokens（diagram-design style-guide + sample-b/c 规范） ============ */
+      :root {
+        --paper: #f5f5f5;
+        --paper-2: #ececec;
+        --ink: #2d3142;
+        --muted: #4f5d75;
+        --soft: #7a8399;
+        --rule: rgba(45, 49, 66, 0.12);
+        --rule-solid: #bfc0c0;
+        --accent: #eb6c36;
+        --accent-tint: rgba(235, 108, 54, 0.08);
+        --link: #2e5aa8;
+        --link-tint: rgba(46, 90, 168, 0.08);
+
+        --card: #ffffff;
+        --cell: rgba(45, 49, 66, 0.02);
+        --done-fill: rgba(45, 49, 66, 0.05);
+        --ghost-fill: rgba(45, 49, 66, 0.02);
+        --ink-15: rgba(45, 49, 66, 0.15);
+        --ink-25: rgba(45, 49, 66, 0.25);
+        --danger-tint: rgba(235, 108, 54, 0.15);
+
+        --sans:
+          system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+        --mono:
+          ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+          "Liberation Mono", "Courier New", monospace;
+        --serif: Georgia, "Times New Roman", Times, serif;
+      }
+
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --paper: #2d3142;
+          --paper-2: #393e53;
+          --ink: #f5f5f5;
+          --muted: #bfc0c0;
+          --soft: #8e98ac;
+          --rule: rgba(245, 245, 245, 0.12);
+          --rule-solid: rgba(191, 192, 192, 0.25);
+          --accent: #f08a59;
+          --accent-tint: rgba(240, 138, 89, 0.1);
+          --link: #6a95d8;
+          --link-tint: rgba(106, 149, 216, 0.12);
+
+          --card: #353a4e;
+          --cell: rgba(245, 245, 245, 0.03);
+          --done-fill: rgba(245, 245, 245, 0.06);
+          --ghost-fill: rgba(245, 245, 245, 0.03);
+          --ink-15: rgba(245, 245, 245, 0.18);
+          --ink-25: rgba(245, 245, 245, 0.28);
+          --danger-tint: rgba(240, 138, 89, 0.2);
+        }
+      }
+
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        background: var(--paper);
+      }
+      body {
+        font-family: var(--sans);
+        color: var(--ink);
+        padding: 24px 28px 48px;
+        -webkit-font-smoothing: antialiased;
+        font-size: 13px;
+        line-height: 1.5;
+      }
+      .wrap {
+        max-width: 1560px;
+        margin: 0 auto;
+      }
+
+      /* ============ 通用工具类 ============ */
+      .mono {
+        font-family: var(--mono);
+      }
+      .eyebrow {
+        font-family: var(--mono);
+        font-size: 9px;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--soft);
+        margin-bottom: 8px;
+      }
+
+      /* ============ 页头 ============ */
+      header.page-header {
+        margin-bottom: 20px;
+      }
+      .head-top {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 16px;
+        flex-wrap: wrap;
+      }
+      .title-group h1 {
+        font-family: var(--serif);
+        font-size: 1.85rem;
+        font-weight: 400;
+        line-height: 1.2;
+        letter-spacing: 0.01em;
+      }
+      .title-group h1 .team-name {
+        font-style: italic;
+      }
+      .subtitle {
+        font-size: 12px;
+        color: var(--muted);
+        margin-top: 4px;
+      }
+      .team-controls {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+      }
+      .select-wrapper {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+      }
+      select.team-select {
+        appearance: none;
+        -webkit-appearance: none;
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--ink);
+        background: var(--card);
+        border: 1px solid var(--rule-solid);
+        border-radius: 4px;
+        padding: 4px 24px 4px 8px;
+        cursor: pointer;
+        outline: none;
+      }
+      select.team-select:focus {
+        border-color: var(--ink);
+      }
+      .select-arrow {
+        position: absolute;
+        right: 8px;
+        pointer-events: none;
+        font-size: 8px;
+        color: var(--muted);
+      }
+
+      .header-meta {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        margin-top: 12px;
+        font-family: var(--mono);
+        font-size: 10px;
+      }
+      .meta-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 3px 8px;
+        border: 1px solid var(--rule-solid);
+        border-radius: 2px;
+        color: var(--muted);
+        background: var(--paper-2);
+        white-space: nowrap;
+      }
+      .meta-chip b {
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .meta-chip.offline {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-tint);
+        font-weight: 600;
+      }
+      .meta-chip.warning {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      .meta-chip.mock {
+        border-style: dashed;
+        color: var(--soft);
+      }
+
+      .header-rule {
+        border: 0;
+        border-top: 1px solid var(--rule);
+        margin: 18px 0 20px;
+      }
+
+      /* ============ 主栅格布局（左中泳道 + 右侧三面板） ============ */
+      .layout-grid {
+        display: grid;
+        grid-template-columns: minmax(720px, 1fr) 340px;
+        gap: 20px;
+        align-items: start;
+      }
+      @media (max-width: 1200px) {
+        .layout-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+
+      /* ============ 左中：B 式角色泳道网格 ============ */
+      .board-container {
+        background: var(--paper-2);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 16px;
+        overflow: hidden;
+      }
+      .board-scroll {
+        overflow-x: auto;
+      }
+      .board {
+        display: grid;
+        grid-template-columns: 210px repeat(4, minmax(160px, 1fr));
+        min-width: 860px;
+      }
+
+      /* 列头 */
+      .corner,
+      .col-head {
+        padding: 8px 12px 10px;
+        border-bottom: 1px solid var(--rule-solid);
+      }
+      .corner {
+        font-family: var(--mono);
+        font-size: 10px;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--soft);
+        align-self: end;
+      }
+      .col-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .col-head .col-name {
+        font-size: 12px;
+        font-weight: 600;
+      }
+      .col-head .col-sub {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        margin-left: 6px;
+      }
+      .wip {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--muted);
+        border: 1px solid var(--rule-solid);
+        border-radius: 2px;
+        padding: 1px 6px;
+        white-space: nowrap;
+        background: var(--card);
+      }
+
+      /* 泳道行 */
+      .role-cell,
+      .cell {
+        border-bottom: 1px solid var(--rule);
+        padding: 14px 10px;
+        min-height: 100px;
+      }
+      .cell {
+        background: var(--cell);
+      }
+      .cell + .cell,
+      .role-cell + .cell {
+        border-left: 1px solid var(--rule);
+      }
+
+      .role-cell {
+        padding-right: 12px;
+      }
+      .role-name-row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .role-name {
+        font-size: 13px;
+        font-weight: 600;
+        word-break: break-all;
+      }
+      .runtime-chip {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.06em;
+        color: var(--muted);
+        border: 1px solid var(--rule-solid);
+        border-radius: 2px;
+        padding: 1px 5px;
+        background: var(--card);
+      }
+      .new-chip {
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 600;
+        letter-spacing: 0.12em;
+        text-transform: uppercase;
+        background: var(--ink);
+        color: var(--paper);
+        border-radius: 2px;
+        padding: 1px 5px;
+      }
+      .role-duty {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 3px;
+      }
+      .role-load {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        margin-top: 8px;
+      }
+      .load-dots {
+        display: flex;
+        gap: 4px;
+        margin-top: 5px;
+        flex-wrap: wrap;
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 2px;
+      }
+      .dot.doing {
+        background: var(--muted);
+      }
+      .dot.done {
+        background: var(--ink-15);
+      }
+      .dot.blocked {
+        background: transparent;
+        border: 1px dashed var(--accent);
+      }
+      .dot.todo {
+        background: var(--rule-solid);
+      }
+
+      /* 待派工泳道 */
+      .lane-backlog .role-cell {
+        border-left: 2px dashed var(--rule-solid);
+      }
+      .lane-backlog .role-name {
+        color: var(--muted);
+      }
+
+      /* 空泳道 */
+      .empty-lane {
+        grid-column: 2 / -1;
+        border-bottom: 1px solid var(--rule);
+        border-left: 1px solid var(--rule);
+        background: var(--cell);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100px;
+        padding: 16px;
+      }
+      .empty-inner {
+        border: 1px dashed var(--rule-solid);
+        border-radius: 6px;
+        padding: 10px 20px;
+        text-align: center;
+      }
+      .empty-inner .zh {
+        font-size: 12px;
+        color: var(--muted);
+      }
+      .empty-inner .en {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        margin-top: 3px;
+      }
+
+      /* ============ 卡片 ============ */
+      .card {
+        background: var(--card);
+        border: 1px solid var(--ink);
+        border-radius: 6px;
+        padding: 9px 11px;
+        position: relative;
+        cursor: pointer;
+        transition:
+          transform 120ms ease,
+          box-shadow 120ms ease,
+          border-color 120ms ease;
+      }
+      .card + .card {
+        margin-top: 10px;
+      }
+      .card:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      }
+      .card.selected {
+        outline: 2px solid var(--ink);
+        outline-offset: 1px;
+      }
+      .card-head-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 3px;
+      }
+      .card-id {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--muted);
+      }
+      .card-title {
+        font-size: 12px;
+        font-weight: 600;
+        line-height: 1.35;
+        word-break: break-word;
+      }
+      .card-meta {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--muted);
+        margin-top: 4px;
+        line-height: 1.5;
+        word-break: break-all;
+      }
+
+      /* 受控徽标 */
+      .badges {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 4px;
+        margin-top: 6px;
+      }
+      .badge {
+        font-family: var(--mono);
+        font-size: 8px;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        border: 1px solid var(--rule-solid);
+        border-radius: 2px;
+        padding: 1px 5px;
+        background: var(--card);
+        white-space: nowrap;
+      }
+      .badge.alert,
+      .badge.fail {
+        color: var(--accent);
+        border-color: var(--accent);
+        background: var(--accent-tint);
+        font-weight: 600;
+      }
+      .badge.rework {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+      .badge.new-badge {
+        background: var(--ink);
+        color: var(--paper);
+        font-weight: 600;
+      }
+      .badge.heuristic {
+        border-style: dashed;
+        color: var(--soft);
+      }
+
+      /* blocked 样式（accent 预算：左竖条 + 虚线描边 + accent-tint 填充） */
+      .card.blocked {
+        background: var(--accent-tint);
+        border: 1px dashed var(--accent);
+        padding-left: 14px;
+      }
+      .card.blocked::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--accent);
+        border-radius: 6px 0 0 6px;
+      }
+
+      /* done 样式 */
+      .card.done {
+        background: var(--done-fill);
+        border-color: var(--muted);
+      }
+      .card.done .card-title {
+        color: var(--muted);
+      }
+
+      /* lineage 芯片序列 */
+      .lineage {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 3px;
+        margin-top: 6px;
+        font-family: var(--mono);
+        font-size: 8px;
+      }
+      .lineage .hop-chip {
+        border: 1px solid var(--rule-solid);
+        border-radius: 2px;
+        padding: 1px 5px;
+        color: var(--muted);
+        background: var(--paper);
+        white-space: nowrap;
+      }
+      .lineage .hop-chip.current {
+        border-color: var(--ink);
+        color: var(--ink);
+        font-weight: 600;
+      }
+      .lineage .arrow {
+        color: var(--soft);
+        font-size: 8px;
+      }
+
+      /* ============ 右侧：C 式三面板 ============ */
+      .sidebar {
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+      .panel {
+        background: var(--paper-2);
+        border: 1px solid var(--rule);
+        border-radius: 8px;
+        padding: 14px 16px;
+      }
+      .panel-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        margin-bottom: 10px;
+      }
+      .panel-note {
+        font-family: var(--mono);
+        font-size: 8px;
+        color: var(--soft);
+        letter-spacing: 0.06em;
+      }
+
+      /* 面板 1：Attention 焦点面板 */
+      .focus-container {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+      }
+      .focus-card {
+        position: relative;
+        background: var(--accent-tint);
+        border: 1px dashed var(--accent);
+        border-radius: 6px;
+        padding: 12px 12px 12px 16px;
+        overflow: hidden;
+      }
+      .focus-card::before {
+        content: "";
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 4px;
+        background: var(--accent);
+      }
+      .focus-id-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-family: var(--mono);
+        font-size: 10px;
+        color: var(--muted);
+      }
+      .focus-title {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 4px 0 2px;
+      }
+      .focus-owner {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 8px;
+      }
+      .receipt-fields {
+        font-family: var(--mono);
+        font-size: 9px;
+        line-height: 1.6;
+        color: var(--ink);
+        background: var(--card);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 6px 8px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      .route-box {
+        margin-top: 10px;
+        border-top: 1px dashed var(--rule-solid);
+        padding-top: 8px;
+      }
+      .route-title {
+        font-size: 11px;
+        font-weight: 600;
+        margin-bottom: 4px;
+      }
+      .route-note {
+        font-size: 11px;
+        color: var(--muted);
+        margin-bottom: 8px;
+        line-height: 1.4;
+      }
+      .route-actions {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .route-btn {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--rule-solid);
+        border-radius: 4px;
+        background: var(--card);
+        padding: 5px 8px;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: default;
+        transition: border-color 0.15s ease;
+      }
+      .route-btn:hover {
+        border-color: var(--ink);
+      }
+      .route-btn.primary {
+        border-color: var(--ink);
+      }
+      .route-btn .hint {
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 400;
+        color: var(--soft);
+      }
+
+      .empty-state {
+        font-size: 11px;
+        color: var(--soft);
+        text-align: center;
+        padding: 16px 8px;
+        border: 1px dashed var(--rule-solid);
+        border-radius: 4px;
+      }
+
+      /* 面板 2：Receipts Feed 回执流 */
+      .stream {
+        display: flex;
+        flex-direction: column;
+        max-height: 320px;
+        overflow-y: auto;
+        padding-right: 4px;
+      }
+      .receipt-item {
+        position: relative;
+        padding: 0 0 12px 16px;
+        border-left: 1px solid var(--rule-solid);
+        margin-left: 4px;
+      }
+      .receipt-item:last-child {
+        padding-bottom: 0;
+      }
+      .receipt-item::before {
+        content: "";
+        position: absolute;
+        left: -4px;
+        top: 4px;
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--paper-2);
+        border: 1.2px solid var(--muted);
+      }
+      .receipt-item.is-blocked::before,
+      .receipt-item.is-failed::before {
+        background: var(--accent);
+        border-color: var(--accent);
+      }
+      .receipt-item-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 8px;
+      }
+      .receipt-item-who {
+        font-family: var(--mono);
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--ink);
+      }
+      .receipt-item-ts {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        white-space: nowrap;
+      }
+      .receipt-item-fields {
+        font-family: var(--mono);
+        font-size: 9px;
+        line-height: 1.6;
+        color: var(--muted);
+        background: var(--card);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 5px 7px;
+        margin-top: 4px;
+        white-space: pre-wrap;
+        word-break: break-all;
+      }
+
+      /* 面板 3：Lineage 轨迹时间线 */
+      .traj-meta {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        margin: -4px 0 10px;
+      }
+      .traj {
+        margin-left: 4px;
+      }
+      .hop-item {
+        position: relative;
+        padding: 0 0 14px 16px;
+        border-left: 1px solid var(--rule-solid);
+      }
+      .hop-item:last-child {
+        border-left-color: transparent;
+        padding-bottom: 0;
+      }
+      .hop-item::before {
+        content: "";
+        position: absolute;
+        left: -5px;
+        top: 3px;
+        width: 9px;
+        height: 9px;
+        border-radius: 50%;
+        border: 1.2px solid var(--muted);
+        background: var(--muted);
+      }
+      .hop-item.current::before {
+        background: var(--paper-2);
+        border: 2px solid var(--ink);
+        left: -6px;
+        width: 10px;
+        height: 10px;
+      }
+      .hop-item-head {
+        display: flex;
+        align-items: baseline;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .hop-item-role {
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .hop-item-role .rt {
+        font-family: var(--mono);
+        font-size: 8px;
+        font-weight: 400;
+        color: var(--soft);
+        margin-left: 3px;
+      }
+      .hop-item-state {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .hop-item-sub {
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        margin-top: 2px;
+        line-height: 1.5;
+        word-break: break-all;
+      }
+
+      /* ============ 图例与页脚 ============ */
+      .legend {
+        margin-top: 24px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 14px 20px;
+        align-items: center;
+      }
+      .legend-item {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--muted);
+      }
+      .sw {
+        width: 16px;
+        height: 10px;
+        border-radius: 2px;
+        flex: none;
+      }
+      .sw.default {
+        background: var(--card);
+        border: 1px solid var(--ink);
+      }
+      .sw.blocked {
+        background: var(--accent-tint);
+        border: 1px dashed var(--accent);
+        box-shadow: inset 3px 0 0 var(--accent);
+      }
+      .sw.done {
+        background: var(--done-fill);
+        border: 1px solid var(--muted);
+      }
+      .sw.lineage {
+        background: var(--paper);
+        border: 1px solid var(--rule-solid);
+      }
+
+      footer.page-footer {
+        margin-top: 20px;
+        padding-top: 14px;
+        border-top: 1px solid var(--rule);
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
+        line-height: 1.6;
+      }
+      /* ============ 任务详情抽屉（goalbuddy 式点击详情） ============ */
+      .detail-backdrop {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.28);
+        opacity: 0;
+        pointer-events: none;
+        transition: opacity 0.18s ease;
+        z-index: 40;
+      }
+      .detail-backdrop.show {
+        opacity: 1;
+        pointer-events: auto;
+      }
+      .detail-drawer {
+        position: fixed;
+        top: 0;
+        right: 0;
+        bottom: 0;
+        width: min(460px, 94vw);
+        background: var(--paper);
+        border-left: 1px solid var(--rule-solid);
+        box-shadow: -12px 0 32px rgba(0, 0, 0, 0.18);
+        transform: translateX(102%);
+        transition: transform 0.2s ease;
+        z-index: 41;
+        display: flex;
+        flex-direction: column;
+      }
+      .detail-drawer.open {
+        transform: translateX(0);
+      }
+      .detail-head {
+        padding: 18px 20px 14px;
+        border-bottom: 1px solid var(--rule);
+        background: var(--paper-2);
+      }
+      .detail-head-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        gap: 10px;
+      }
+      .detail-task-id {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--soft);
+        letter-spacing: 0.06em;
+      }
+      .detail-close {
+        border: 1px solid var(--rule-solid);
+        background: transparent;
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 11px;
+        line-height: 1;
+        padding: 5px 8px;
+        border-radius: 3px;
+        cursor: pointer;
+      }
+      .detail-close:hover {
+        color: var(--ink);
+        border-color: var(--ink-25);
+      }
+      .detail-title {
+        font-size: 16px;
+        font-weight: 600;
+        margin: 6px 0 8px;
+      }
+      .detail-chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+      }
+      .state-chip {
+        font-family: var(--mono);
+        font-size: 9px;
+        letter-spacing: 0.1em;
+        text-transform: uppercase;
+        padding: 3px 7px;
+        border-radius: 2px;
+        border: 1px solid var(--ink-25);
+        color: var(--muted);
+      }
+      .state-chip.st-doing {
+        border-color: var(--link);
+        color: var(--link);
+        background: var(--link-tint);
+      }
+      .state-chip.st-blocked {
+        border-color: var(--accent);
+        color: var(--accent);
+        background: var(--accent-tint);
+      }
+      .state-chip.st-done {
+        background: var(--done-fill);
+      }
+      .detail-body {
+        overflow-y: auto;
+        padding: 16px 20px 28px;
+        flex: 1;
+      }
+      .detail-section {
+        margin-bottom: 18px;
+      }
+      .detail-text {
+        font-size: 12.5px;
+        color: var(--ink);
+        white-space: pre-wrap;
+        background: var(--cell);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 10px 12px;
+        line-height: 1.6;
+      }
+      .detail-kv {
+        font-family: var(--mono);
+        font-size: 11px;
+        background: var(--cell);
+        border: 1px solid var(--rule);
+        border-radius: 4px;
+        padding: 10px 12px;
+        line-height: 1.9;
+        white-space: pre-wrap;
+      }
+      .detail-kv .k {
+        color: var(--soft);
+      }
+      .detail-empty {
+        font-size: 12px;
+        color: var(--soft);
+        font-style: italic;
+      }
+      .block-at-box {
+        border: 1px dashed var(--accent);
+        background: var(--accent-tint);
+        border-radius: 4px;
+        padding: 10px 12px;
+        font-size: 12.5px;
+      }
+      .block-at-box .why {
+        color: var(--muted);
+        margin-top: 4px;
+        font-size: 12px;
+      }
+      .task-link {
+        font-family: var(--mono);
+        font-size: 11px;
+        color: var(--link);
+        background: var(--link-tint);
+        border: 1px solid var(--link);
+        border-radius: 2px;
+        padding: 2px 6px;
+        cursor: pointer;
+        display: inline-block;
+      }
+      .task-link:hover {
+        filter: brightness(0.92);
+      }
+      .chain-list {
+        border-left: 2px solid var(--rule-solid);
+        margin-left: 6px;
+        padding-left: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .chain-node {
+        position: relative;
+        font-size: 12.5px;
+      }
+      .chain-node::before {
+        content: "";
+        position: absolute;
+        left: -19.5px;
+        top: 5px;
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--paper);
+        border: 2px solid var(--rule-solid);
+      }
+      .chain-node.current::before {
+        border-color: var(--link);
+        background: var(--link);
+      }
+      .chain-node.future::before {
+        border-style: dashed;
+      }
+      .chain-node .cn-head {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+        flex-wrap: wrap;
+      }
+      .chain-node .cn-worker {
+        font-weight: 600;
+      }
+      .chain-node .cn-sub {
+        font-family: var(--mono);
+        font-size: 10.5px;
+        color: var(--soft);
+        margin-top: 1px;
+      }
+      .chain-node.future .cn-worker,
+      .chain-node.future .cn-sub {
+        color: var(--soft);
+        font-style: italic;
+      }
+      .role-chip-row {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <!-- ============ 页头 ============ -->
+      <header class="page-header">
+        <div class="eyebrow">tmux-agent-teams · team kanban board</div>
+        <div class="head-top">
+          <div class="title-group">
+            <h1>
+              <span class="team-name" id="hdrTeamTitle">-</span> — 工作任务看板
+            </h1>
+            <p class="subtitle">
+              B 式角色泳道为主骨架 · 融合 C 式焦点决策与回执流 · 2s 实时轮询
+            </p>
+          </div>
+          <div class="team-controls">
+            <div class="select-wrapper">
+              <select class="team-select" id="teamSelect" title="切换 Team">
+                <option value="">加载中...</option>
+              </select>
+              <span class="select-arrow">▼</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="header-meta" id="headerMeta">
+          <span class="meta-chip">team <b id="metaTeamName">-</b></span>
+          <span class="meta-chip">mode <b id="metaMode">-</b></span>
+          <span class="meta-chip">session <b id="metaSession">-</b></span>
+          <span class="meta-chip">roster <b id="metaRoster">-</b></span>
+          <span class="meta-chip">tasks <b id="metaTasks">-</b></span>
+          <span class="meta-chip">lineage <b id="metaLineage">-</b></span>
+          <span class="meta-chip">refreshed <b id="metaRefreshed">-</b></span>
+          <span class="meta-chip offline" id="chipOffline" style="display: none"
+            >OFFLINE</span
+          >
+          <span
+            class="meta-chip warning"
+            id="chipWarnings"
+            style="display: none"
+          ></span>
+          <span class="meta-chip mock" id="chipMock" style="display: none"
+            >MOCK MODE (?mock=1)</span
+          >
+        </div>
+      </header>
+
+      <hr class="header-rule" />
+
+      <!-- ============ 主布局 ============ -->
+      <div class="layout-grid">
+        <!-- 左侧：B 角色泳道网格 -->
+        <main class="board-container">
+          <div class="board-scroll">
+            <div class="board" id="boardGrid">
+              <!-- 列头与泳道由 JS 动态渲染 -->
+            </div>
+          </div>
+
+          <!-- 图例 -->
+          <div class="legend">
+            <span class="legend-item"
+              ><span class="sw default"></span> 待办 / 进行中</span
+            >
+            <span class="legend-item"
+              ><span class="sw blocked"></span> 受阻（accent 竖条 + 虚线）</span
+            >
+            <span class="legend-item"
+              ><span class="sw done"></span> 已完成</span
+            >
+            <span class="legend-item"
+              ><span class="sw lineage"></span> lineage 芯片 = 任务在 worker
+              间接力流转</span
+            >
+          </div>
+        </main>
+
+        <!-- 右侧：C 式三面板 -->
+        <aside class="sidebar">
+          <!-- 面板 1：需要 Leader 决策 -->
+          <section class="panel">
+            <div class="panel-header">
+              <div class="eyebrow" id="attnHeader">需要 Leader 决策 · 0</div>
+              <span class="panel-note">receipt.status/next</span>
+            </div>
+            <div class="focus-container" id="attnContainer">
+              <div class="empty-state">当前无受阻或待决策任务</div>
+            </div>
+          </section>
+
+          <!-- 面板 2：回执流 -->
+          <section class="panel">
+            <div class="panel-header">
+              <div class="eyebrow">回执流 · receipts/</div>
+              <span class="panel-note">whitelist verified</span>
+            </div>
+            <div class="stream" id="receiptsFeedContainer">
+              <div class="empty-state">暂无回执</div>
+            </div>
+          </section>
+
+          <!-- 面板 3：选中任务轨迹时间线 -->
+          <section class="panel">
+            <div class="panel-header">
+              <div class="eyebrow">角色轨迹 · 选中任务</div>
+              <span class="panel-note" id="trajSourceNote">-</span>
+            </div>
+            <div class="traj-meta" id="trajMetaTitle">
+              请在看板中点击任意卡片查看轨迹
+            </div>
+            <div class="traj" id="trajTimelineContainer">
+              <!-- 轨迹节点由 JS 渲染 -->
+            </div>
+          </section>
+        </aside>
+      </div>
+
+      <!-- ============ 任务详情抽屉 ============ -->
+      <div class="detail-backdrop" id="detailBackdrop"></div>
+      <aside class="detail-drawer" id="detailDrawer" aria-hidden="true">
+        <div class="detail-head">
+          <div class="detail-head-row">
+            <span class="detail-task-id" id="detailTaskId">-</span>
+            <button class="detail-close" id="detailCloseBtn" title="关闭 (Esc)">
+              ✕ ESC
+            </button>
+          </div>
+          <div class="detail-title" id="detailTitle">-</div>
+          <div class="detail-chips" id="detailChips"></div>
+        </div>
+        <div class="detail-body" id="detailBody">
+          <!-- 详情内容由 JS 渲染 -->
+        </div>
+      </aside>
+
+      <!-- 页脚 -->
+      <footer class="page-footer">
+        <span
+          >tmux-agent-teams control surface ·
+          遵守控制面/工作面信息边界（永不读取 artifacts/ 内容） · 数据源自
+          <code>/api/team</code> 轮询</span
+        >
+      </footer>
+    </div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        /* ================= MOCK 数据（契约规范 schema，?mock=1 时启用） ================= */
+        var MOCK_DATA = {
+          team: {
+            name: "payments-refactor",
+            status: "active",
+            mode: "feature-mr",
+            session: "team-payments",
+          },
+          roster: [
+            {
+              worker: "impl-a",
+              runtime: "claude",
+              role: "worker",
+              registered_at: null,
+              new: false,
+            },
+            {
+              worker: "impl-b",
+              runtime: "codex",
+              role: "worker",
+              registered_at: null,
+              new: false,
+            },
+            {
+              worker: "reviewer",
+              runtime: "claude",
+              role: "reviewer",
+              registered_at: null,
+              new: false,
+            },
+            {
+              worker: "perf-analyst",
+              runtime: "codex",
+              role: "perf",
+              registered_at: null,
+              new: true,
+            },
+          ],
+          tasks: [
+            {
+              id: "T7",
+              title: "对账单导出接口",
+              detail:
+                "从对账域读取月度账单，输出 CSV/JSON 双格式导出接口。\n验收：两种格式字段清单一致；支持分页与幂等重试。",
+              column: "todo",
+              owner: null,
+              badges: [],
+              receipt: null,
+              worktree: null,
+              lineage: {
+                chain: [{ task: "T7", worker: "impl-a" }],
+                source: "heuristic",
+              },
+            },
+            {
+              id: "T8",
+              title: "幂等键迁移脚本",
+              detail:
+                "把历史订单幂等键迁移到 v2 格式。\n方法：双写窗口 + 校验脚本；验收：抽样 10k 条零差异。",
+              column: "todo",
+              owner: null,
+              badges: [],
+              receipt: null,
+              worktree: null,
+              lineage: {
+                chain: [{ task: "T8", worker: "impl-b" }],
+                source: "heuristic",
+              },
+            },
+            {
+              id: "T3",
+              title: "流水表分区改造",
+              detail:
+                "流水表按月分区改造。T3-verify 判 fail 后退回返工：需修复分区键选择导致的写入热点。",
+              column: "todo",
+              owner: null,
+              badges: ["rework"],
+              receipt: null,
+              worktree: null,
+              lineage: {
+                chain: [
+                  { task: "T3", worker: "impl-a" },
+                  { task: "T3-verify", worker: "reviewer" },
+                  { task: "T3", worker: "impl-a" },
+                ],
+                source: "flow",
+              },
+            },
+            {
+              id: "T6",
+              title: "支付网关重试策略",
+              detail:
+                "支付网关调用重试策略：指数退避 + 抖动，按错误码区分可重试/不可重试。\n验收：压测下成功率 ≥ 99.9%。",
+              column: "doing",
+              owner: "impl-b",
+              badges: [],
+              receipt: null,
+              worktree: {
+                mr: null,
+                branch: "feat/gateway-retry",
+                status: "working",
+              },
+              lineage: {
+                chain: [{ task: "T6", worker: "impl-b" }],
+                source: "flow",
+              },
+            },
+            {
+              id: "T5-verify",
+              title: "验证退款路径改造",
+              detail:
+                "独立验证 T5 退款路径改造：核对退款状态机流转与对账一致性。\n输入：T5 工件的不透明路径（不读实现细节以外的内容）。",
+              column: "doing",
+              owner: "reviewer",
+              badges: [],
+              receipt: null,
+              worktree: {
+                mr: "!41",
+                branch: "feat/refund-path",
+                status: "review",
+              },
+              lineage: {
+                chain: [
+                  { task: "T5", worker: "impl-a" },
+                  { task: "T5-verify", worker: "reviewer" },
+                ],
+                source: "flow",
+              },
+            },
+            {
+              id: "T4",
+              title: "账务快照压缩",
+              detail:
+                "压缩历史账务快照存储，降低冷数据成本。\n依赖：T2 分区改造产出的新表结构。",
+              column: "blocked",
+              owner: "impl-a",
+              badges: ["receipt:blocked"],
+              receipt: {
+                status: "blocked",
+                verdict: "unverified",
+                blocker: "T2",
+                next: "await_user",
+                artifact: "artifacts/T4/notes.md",
+              },
+              worktree: {
+                mr: null,
+                branch: "feat/snapshot-compress",
+                status: "working",
+              },
+              blocked_since: 1756366920,
+              lineage: {
+                chain: [{ task: "T4", worker: "impl-a" }],
+                source: "flow",
+              },
+            },
+            {
+              id: "T1",
+              title: "支付域建模",
+              detail:
+                "支付域领域建模：聚合根/实体/值对象清单 + 事件风暴产物。",
+              column: "done",
+              owner: "impl-a",
+              badges: [],
+              receipt: {
+                status: "completed",
+                verdict: "pass",
+                blocker: "none",
+                next: "verify",
+                artifact: "artifacts/T1.md",
+              },
+              worktree: null,
+              lineage: {
+                chain: [
+                  { task: "T1", worker: "impl-a" },
+                  { task: "T1-verify", worker: "reviewer" },
+                ],
+                source: "flow",
+              },
+            },
+            {
+              id: "T2",
+              title: "交易表分区改造",
+              detail:
+                "交易表按 merchant_id 哈希分区。\n验收：目标查询 P99 延迟下降 50%。",
+              column: "done",
+              owner: "impl-b",
+              badges: [],
+              receipt: {
+                status: "completed",
+                verdict: "pass",
+                blocker: "none",
+                next: "none",
+                artifact: "artifacts/T2.md",
+              },
+              worktree: {
+                mr: "!38",
+                branch: "feat/tx-partition",
+                status: "merged",
+              },
+              lineage: {
+                chain: [{ task: "T2", worker: "impl-b" }],
+                source: "flow",
+              },
+            },
+            {
+              id: "T3-verify",
+              title: "验证分区改造",
+              detail:
+                "验证 T3 分区改造：检查分区裁剪命中率与热点分布。\n判定 fail，路由 rework 回 impl-a。",
+              column: "done",
+              owner: "reviewer",
+              badges: ["verdict:fail"],
+              receipt: {
+                status: "completed",
+                verdict: "fail",
+                blocker: "none",
+                next: "rework",
+                artifact: "artifacts/T3-verify.md",
+              },
+              worktree: null,
+              lineage: {
+                chain: [
+                  { task: "T3", worker: "impl-a" },
+                  { task: "T3-verify", worker: "reviewer" },
+                ],
+                source: "flow",
+              },
+            },
+          ],
+          attention: ["T4"],
+          receipts_feed: [
+            {
+              task: "T4",
+              worker: "impl-a",
+              mtime: 1756366920,
+              fields: {
+                status: "blocked",
+                verdict: "unverified",
+                blocker: "T2",
+                next: "await_user",
+                artifact: "artifacts/T4/notes.md",
+              },
+            },
+            {
+              task: "T3-verify",
+              worker: "reviewer",
+              mtime: 1756365480,
+              fields: {
+                status: "completed",
+                verdict: "fail",
+                blocker: "none",
+                next: "rework",
+                artifact: "artifacts/T3-verify.md",
+              },
+            },
+            {
+              task: "T2",
+              worker: "impl-b",
+              mtime: 1756362600,
+              fields: {
+                status: "completed",
+                verdict: "pass",
+                blocker: "none",
+                next: "none",
+                artifact: "artifacts/T2.md",
+              },
+            },
+            {
+              task: "T1",
+              worker: "impl-a",
+              mtime: 1756358400,
+              fields: {
+                status: "completed",
+                verdict: "pass",
+                blocker: "none",
+                next: "verify",
+                artifact: "artifacts/T1.md",
+              },
+            },
+          ],
+          generated_at: 1756367000,
+          warnings: [],
+        };
+
+        /* ================= 状态变量 ================= */
+        var urlParams = new URLSearchParams(window.location.search);
+        var isMock = urlParams.get("mock") !== "0"; // 模板版：mock 默认开启，?mock=0 关闭
+        var selectedTeam = urlParams.get("team") || "";
+        var currentData = null;
+        var selectedTaskId = null;
+        var isOffline = false;
+        var pollTimer = null;
+
+        /* ================= 安全 DOM 构建工具函数（纯 textContent 拼装，绝不 innerHTML） ================= */
+        function clearNode(node) {
+          if (!node) return;
+          while (node.firstChild) {
+            node.removeChild(node.firstChild);
+          }
+        }
+
+        function createEl(tag, className, textContent) {
+          var el = document.createElement(tag);
+          if (className) el.className = className;
+          if (textContent !== undefined && textContent !== null) {
+            el.textContent = String(textContent);
+          }
+          return el;
+        }
+
+        function formatTime(timestamp) {
+          if (!timestamp) return "-";
+          var date = new Date(timestamp * 1000);
+          if (isNaN(date.getTime())) return String(timestamp);
+          var h = String(date.getHours()).padStart(2, "0");
+          var m = String(date.getMinutes()).padStart(2, "0");
+          var s = String(date.getSeconds()).padStart(2, "0");
+          return h + ":" + m + ":" + s;
+        }
+
+        /* ================= 渲染页头 ================= */
+        function renderHeader(data) {
+          var team = data.team || {};
+          var teamTitle = document.getElementById("hdrTeamTitle");
+          teamTitle.textContent = team.name || "未知 Team";
+
+          document.getElementById("metaTeamName").textContent =
+            team.name || "-";
+          document.getElementById("metaMode").textContent = team.mode || "-";
+          document.getElementById("metaSession").textContent =
+            team.session || "-";
+
+          var roster = data.roster || [];
+          var newCount = roster.filter(function (r) {
+            return r.new;
+          }).length;
+          var rosterText = roster.length + " workers";
+          if (newCount > 0) rosterText += " · " + newCount + " new";
+          document.getElementById("metaRoster").textContent = rosterText;
+
+          var tasks = data.tasks || [];
+          document.getElementById("metaTasks").textContent = String(
+            tasks.length,
+          );
+
+          var hasHeuristic = tasks.some(function (t) {
+            return t.lineage && t.lineage.source === "heuristic";
+          });
+          document.getElementById("metaLineage").textContent = hasHeuristic
+            ? "heuristic"
+            : "flow.tsv";
+
+          document.getElementById("metaRefreshed").textContent = formatTime(
+            data.generated_at || Date.now() / 1000,
+          );
+
+          // Offline 芯片
+          var chipOffline = document.getElementById("chipOffline");
+          chipOffline.style.display = isOffline ? "inline-flex" : "none";
+
+          // Warnings 芯片
+          var chipWarnings = document.getElementById("chipWarnings");
+          if (data.warnings && data.warnings.length > 0) {
+            chipWarnings.style.display = "inline-flex";
+            chipWarnings.textContent =
+              "warnings (" + data.warnings.length + ")";
+            chipWarnings.title = data.warnings.join("\n");
+          } else {
+            chipWarnings.style.display = "none";
+          }
+
+          // Mock 芯片
+          var chipMock = document.getElementById("chipMock");
+          chipMock.style.display = isMock ? "inline-flex" : "none";
+        }
+
+        /* ================= 受控徽标映射 ================= */
+        function createBadge(badgeText) {
+          var b = createEl("span", "badge", badgeText);
+          if (
+            badgeText === "receipt:blocked" ||
+            badgeText === "worktree:blocked"
+          ) {
+            b.className = "badge alert";
+          } else if (
+            badgeText === "receipt:failed" ||
+            badgeText === "verdict:fail"
+          ) {
+            b.className = "badge fail";
+          } else if (badgeText === "rework") {
+            b.className = "badge rework";
+          } else if (badgeText === "new") {
+            b.className = "badge new-badge";
+          } else if (
+            badgeText === "heuristic-lineage" ||
+            badgeText.indexOf("heuristic") !== -1
+          ) {
+            b.className = "badge heuristic";
+          }
+          return b;
+        }
+
+        /* ================= 渲染单个任务卡片 ================= */
+        function renderTaskCard(task) {
+          var card = createEl("div", "card");
+          if (task.column === "blocked") {
+            card.classList.add("blocked");
+          } else if (task.column === "done") {
+            card.classList.add("done");
+          }
+          if (selectedTaskId === task.id) {
+            card.classList.add("selected");
+          }
+
+          card.addEventListener("click", function (e) {
+            openTaskDetail(task.id);
+          });
+
+          // 头部 ID 行
+          var headRow = createEl("div", "card-head-row");
+          var idEl = createEl("span", "card-id", task.id);
+          headRow.appendChild(idEl);
+          card.appendChild(headRow);
+
+          // 标题
+          var titleEl = createEl("div", "card-title", task.title || "(无标题)");
+          card.appendChild(titleEl);
+
+          // Meta 信息（worktree, receipt 摘要）
+          var metaParts = [];
+          if (task.worktree) {
+            if (task.worktree.mr) metaParts.push("MR " + task.worktree.mr);
+            if (task.worktree.branch) metaParts.push(task.worktree.branch);
+            if (task.worktree.status)
+              metaParts.push("wt:" + task.worktree.status);
+          }
+          if (task.receipt) {
+            if (task.receipt.status)
+              metaParts.push("status:" + task.receipt.status);
+            if (task.receipt.verdict && task.receipt.verdict !== "none")
+              metaParts.push("verdict:" + task.receipt.verdict);
+            if (task.receipt.blocker && task.receipt.blocker !== "none")
+              metaParts.push("blocker:" + task.receipt.blocker);
+          }
+          if (metaParts.length > 0) {
+            var metaEl = createEl("div", "card-meta", metaParts.join(" · "));
+            card.appendChild(metaEl);
+          }
+
+          // Badges 徽标
+          var badges = task.badges || [];
+          if (badges.length > 0) {
+            var badgesContainer = createEl("div", "badges");
+            for (var i = 0; i < badges.length; i++) {
+              badgesContainer.appendChild(createBadge(badges[i]));
+            }
+            card.appendChild(badgesContainer);
+          }
+
+          // Lineage 芯片序列
+          if (
+            task.lineage &&
+            task.lineage.chain &&
+            task.lineage.chain.length > 1
+          ) {
+            var lineageContainer = createEl("div", "lineage");
+            var chain = task.lineage.chain;
+            for (var c = 0; c < chain.length; c++) {
+              if (c > 0) {
+                lineageContainer.appendChild(createEl("span", "arrow", "→"));
+              }
+              var hop = chain[c];
+              var isCurrent = c === chain.length - 1;
+              var chip = createEl(
+                "span",
+                "hop-chip" + (isCurrent ? " current" : ""),
+                hop.worker || hop.task,
+              );
+              lineageContainer.appendChild(chip);
+            }
+            card.appendChild(lineageContainer);
+          }
+
+          return card;
+        }
+
+        /* ================= 渲染 B 式角色泳道看板 ================= */
+        function renderBoard(data) {
+          var board = document.getElementById("boardGrid");
+          clearNode(board);
+
+          var roster = data.roster || [];
+          var tasks = data.tasks || [];
+
+          // 计算各状态总任务数（用于列头 WIP）
+          var colCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
+          for (var i = 0; i < tasks.length; i++) {
+            var col = tasks[i].column || "todo";
+            if (colCounts[col] !== undefined) {
+              colCounts[col]++;
+            }
+          }
+
+          // 1. 列头
+          var corner = createEl("div", "corner", "role ↓ / state →");
+          board.appendChild(corner);
+
+          var columnsConfig = [
+            { key: "todo", name: "待办", sub: "todo" },
+            { key: "doing", name: "进行中", sub: "doing" },
+            { key: "blocked", name: "受阻", sub: "blocked" },
+            { key: "done", name: "已完成", sub: "done" },
+          ];
+
+          for (var c = 0; c < columnsConfig.length; c++) {
+            var cfg = columnsConfig[c];
+            var colHead = createEl("div", "col-head");
+            var leftSpan = createEl("span");
+            leftSpan.appendChild(createEl("span", "col-name", cfg.name));
+            leftSpan.appendChild(createEl("span", "col-sub", cfg.sub));
+            colHead.appendChild(leftSpan);
+
+            var wip = createEl("span", "wip", String(colCounts[cfg.key]));
+            colHead.appendChild(wip);
+            board.appendChild(colHead);
+          }
+
+          // 2. 泳道 0：待派工池（column === "todo" 且 owner === null 的契约）
+          var backlogTasks = tasks.filter(function (t) {
+            return t.column === "todo" && !t.owner;
+          });
+
+          var backlogRoleCell = createEl("div", "role-cell lane-backlog");
+          var backlogNameRow = createEl("div", "role-name-row");
+          backlogNameRow.appendChild(createEl("span", "role-name", "待派工"));
+          backlogRoleCell.appendChild(backlogNameRow);
+          backlogRoleCell.appendChild(
+            createEl("div", "role-duty", "契约已写、尚无 owner"),
+          );
+          backlogRoleCell.appendChild(
+            createEl(
+              "div",
+              "role-load",
+              backlogTasks.length + " backlog · no owner",
+            ),
+          );
+          board.appendChild(backlogRoleCell);
+
+          // 待派工的 4 个格子
+          // todo 格放 backlogTasks
+          var backlogTodoCell = createEl("div", "cell");
+          for (var b = 0; b < backlogTasks.length; b++) {
+            backlogTodoCell.appendChild(renderTaskCard(backlogTasks[b]));
+          }
+          board.appendChild(backlogTodoCell);
+
+          // 其余 3 格为空
+          board.appendChild(createEl("div", "cell"));
+          board.appendChild(createEl("div", "cell"));
+          board.appendChild(createEl("div", "cell"));
+
+          // 3. 动态角色泳道（遍历 roster）
+          for (var r = 0; r < roster.length; r++) {
+            var workerObj = roster[r];
+            var workerName = workerObj.worker;
+
+            // 找出属于该 worker 的任务
+            var workerTasks = tasks.filter(function (t) {
+              return t.owner === workerName;
+            });
+
+            var roleCell = createEl("div", "role-cell");
+            var nameRow = createEl("div", "role-name-row");
+            nameRow.appendChild(createEl("span", "role-name", workerName));
+
+            if (workerObj.runtime) {
+              nameRow.appendChild(
+                createEl("span", "runtime-chip", workerObj.runtime),
+              );
+            }
+            if (workerObj.new) {
+              nameRow.appendChild(createEl("span", "new-chip", "new"));
+            }
+            roleCell.appendChild(nameRow);
+
+            var dutyText = workerObj.role || "worker";
+            roleCell.appendChild(createEl("div", "role-duty", dutyText));
+
+            // 负载统计
+            var wStats = { todo: 0, doing: 0, blocked: 0, done: 0 };
+            for (var wt = 0; wt < workerTasks.length; wt++) {
+              var cKey = workerTasks[wt].column || "todo";
+              if (wStats[cKey] !== undefined) wStats[cKey]++;
+            }
+            var loadParts = [];
+            if (wStats.doing > 0) loadParts.push(wStats.doing + " doing");
+            if (wStats.blocked > 0) loadParts.push(wStats.blocked + " blocked");
+            if (wStats.done > 0) loadParts.push(wStats.done + " done");
+            if (wStats.todo > 0) loadParts.push(wStats.todo + " todo");
+            var loadStr =
+              loadParts.length > 0 ? loadParts.join(" · ") : "0 tasks";
+            if (workerObj.new && workerTasks.length === 0)
+              loadStr = "0 tasks · just registered";
+            roleCell.appendChild(createEl("div", "role-load", loadStr));
+
+            // 负载点阵
+            if (workerTasks.length > 0) {
+              var loadDots = createEl("div", "load-dots");
+              for (var d = 0; d < workerTasks.length; d++) {
+                var tCol = workerTasks[d].column || "todo";
+                var dot = createEl("span", "dot " + tCol);
+                loadDots.appendChild(dot);
+              }
+              roleCell.appendChild(loadDots);
+            }
+            board.appendChild(roleCell);
+
+            // 如果完全无任务且为新角色，显示跨 4 列的空泳道
+            if (workerTasks.length === 0 && workerObj.new) {
+              var emptyLane = createEl("div", "empty-lane");
+              var inner = createEl("div", "empty-inner");
+              inner.appendChild(
+                createEl(
+                  "div",
+                  "zh",
+                  "刚注册，暂无任务 —— 泳道由名册动态生成，注册即出现",
+                ),
+              );
+              inner.appendChild(
+                createEl(
+                  "div",
+                  "en",
+                  "workers.tsv +row → lane appears · no dispatch yet",
+                ),
+              );
+              emptyLane.appendChild(inner);
+              board.appendChild(emptyLane);
+            } else {
+              // 渲染 4 个状态格子
+              for (var colIdx = 0; colIdx < columnsConfig.length; colIdx++) {
+                var colName = columnsConfig[colIdx].key;
+                var cell = createEl("div", "cell");
+                var matched = workerTasks.filter(function (t) {
+                  return t.column === colName;
+                });
+                for (var m = 0; m < matched.length; m++) {
+                  cell.appendChild(renderTaskCard(matched[m]));
+                }
+                board.appendChild(cell);
+              }
+            }
+          }
+        }
+
+        /* ================= 渲染 C 式三面板 ================= */
+        function renderSidebar(data) {
+          renderAttentionPanel(data);
+          renderReceiptsFeed(data);
+          renderLineageTimeline(data);
+        }
+
+        /* 1. Attention 焦点面板 */
+        function renderAttentionPanel(data) {
+          var container = document.getElementById("attnContainer");
+          var header = document.getElementById("attnHeader");
+          clearNode(container);
+
+          var attentionIds = data.attention || [];
+          var tasks = data.tasks || [];
+          var attentionTasks = [];
+
+          // 根据 attention 数组匹配任务，或受阻/等待的任务
+          for (var i = 0; i < attentionIds.length; i++) {
+            var found = tasks.filter(function (t) {
+              return t.id === attentionIds[i];
+            })[0];
+            if (found) attentionTasks.push(found);
+          }
+
+          // 兜底：如果 attention 数组为空，但存在 blocked 或 failed 任务，也视为 attention
+          if (attentionTasks.length === 0) {
+            for (var k = 0; k < tasks.length; k++) {
+              var t = tasks[k];
+              if (
+                t.column === "blocked" ||
+                (t.receipt &&
+                  (t.receipt.status === "blocked" ||
+                    t.receipt.status === "failed" ||
+                    t.receipt.next === "await_user"))
+              ) {
+                attentionTasks.push(t);
+              }
+            }
+          }
+
+          header.textContent = "需要 Leader 决策 · " + attentionTasks.length;
+
+          if (attentionTasks.length === 0) {
+            container.appendChild(
+              createEl("div", "empty-state", "当前无受阻或待决策任务"),
+            );
+            return;
+          }
+
+          for (var j = 0; j < attentionTasks.length; j++) {
+            var task = attentionTasks[j];
+            var card = createEl("div", "focus-card");
+
+            // ID 行
+            var idRow = createEl("div", "focus-id-row");
+            var idText = task.id;
+            if (task.worktree && task.worktree.branch)
+              idText += " · " + task.worktree.branch;
+            idRow.appendChild(createEl("span", null, idText));
+
+            var alertBadge = createEl("span", "badge alert", "receipt:blocked");
+            if (task.receipt && task.receipt.status === "failed") {
+              alertBadge.textContent = "receipt:failed";
+            }
+            idRow.appendChild(alertBadge);
+            card.appendChild(idRow);
+
+            // 标题
+            card.appendChild(
+              createEl("div", "focus-title", task.title || "(无标题)"),
+            );
+
+            // Owner 与状态
+            var ownerText =
+              "owner " + (task.owner || "未指派") + " · 回执已收，等待路由";
+            card.appendChild(createEl("div", "focus-owner", ownerText));
+
+            // 回执字段等宽展示
+            if (task.receipt) {
+              var r = task.receipt;
+              var rBox = createEl("div", "receipt-fields");
+              var lines = [
+                "status  : " + (r.status || "-"),
+                "verdict : " + (r.verdict || "-"),
+                "blocker : " + (r.blocker || "-"),
+                "next    : " + (r.next || "-"),
+                "artifact: " + (r.artifact || "-"),
+              ];
+              rBox.textContent = lines.join("\n");
+              card.appendChild(rBox);
+            }
+
+            // 路由建议
+            var routeBox = createEl("div", "route-box");
+            routeBox.appendChild(createEl("div", "route-title", "路由建议"));
+
+            var blocker = task.receipt ? task.receipt.blocker : "none";
+            var noteText = "任务目前处于受阻状态，等待 Leader 派工指令。";
+            if (blocker && blocker !== "none") {
+              // 查找 blocker 是否在 done 里
+              var blockerTask = tasks.filter(function (x) {
+                return x.id === blocker;
+              })[0];
+              if (blockerTask && blockerTask.column === "done") {
+                noteText =
+                  "阻塞项 " +
+                  blocker +
+                  " 已完成（verdict: " +
+                  (blockerTask.receipt ? blockerTask.receipt.verdict : "pass") +
+                  "）。前置条件已消除，可解除阻塞继续推进。";
+              } else {
+                noteText = "前序阻塞项为 " + blocker + "，需待前序完成后重派。";
+              }
+            }
+            routeBox.appendChild(createEl("div", "route-note", noteText));
+
+            // 路由展示性按钮
+            var actions = createEl("div", "route-actions");
+            var ownerName = task.owner || "impl-a";
+
+            var btn1 = createEl("div", "route-btn primary");
+            btn1.appendChild(
+              createEl("span", null, "解除阻塞，回派 " + ownerName),
+            );
+            btn1.appendChild(
+              createEl(
+                "span",
+                "hint",
+                "teamctl dispatch " + task.id + " " + ownerName,
+              ),
+            );
+            btn1.title = "teamctl dispatch " + task.id + " " + ownerName;
+            actions.appendChild(btn1);
+
+            var btn2 = createEl("div", "route-btn");
+            btn2.appendChild(createEl("span", null, "转派其他 worker"));
+            btn2.appendChild(
+              createEl(
+                "span",
+                "hint",
+                "teamctl dispatch " + task.id + " <worker>",
+              ),
+            );
+            btn2.title = "teamctl dispatch " + task.id + " <worker>";
+            actions.appendChild(btn2);
+
+            routeBox.appendChild(actions);
+            card.appendChild(routeBox);
+
+            container.appendChild(card);
+          }
+        }
+
+        /* 2. Receipts Feed 回执流 */
+        function renderReceiptsFeed(data) {
+          var container = document.getElementById("receiptsFeedContainer");
+          clearNode(container);
+
+          var feed = data.receipts_feed || [];
+          if (feed.length === 0) {
+            container.appendChild(
+              createEl("div", "empty-state", "暂无回执流数据"),
+            );
+            return;
+          }
+
+          for (var i = 0; i < feed.length; i++) {
+            var item = feed[i];
+            var itemEl = createEl("div", "receipt-item");
+            var fields = item.fields || {};
+
+            if (fields.status === "blocked") itemEl.classList.add("is-blocked");
+            if (fields.status === "failed") itemEl.classList.add("is-failed");
+
+            var head = createEl("div", "receipt-item-head");
+            var who = (item.task || "task") + " · " + (item.worker || "worker");
+            head.appendChild(createEl("span", "receipt-item-who", who));
+            head.appendChild(
+              createEl("span", "receipt-item-ts", formatTime(item.mtime)),
+            );
+            itemEl.appendChild(head);
+
+            var fieldsBox = createEl("div", "receipt-item-fields");
+            var lines = [];
+            if (fields.status) lines.push("status : " + fields.status);
+            if (fields.verdict && fields.verdict !== "none")
+              lines.push("verdict: " + fields.verdict);
+            if (fields.blocker && fields.blocker !== "none")
+              lines.push("blocker: " + fields.blocker);
+            if (fields.next && fields.next !== "none")
+              lines.push("next   : " + fields.next);
+            lines.push("DONE " + item.task);
+            fieldsBox.textContent = lines.join("\n");
+            itemEl.appendChild(fieldsBox);
+
+            container.appendChild(itemEl);
+          }
+        }
+
+        /* 3. 角色轨迹时间线 */
+        function renderLineageTimeline(data) {
+          var container = document.getElementById("trajTimelineContainer");
+          var metaTitle = document.getElementById("trajMetaTitle");
+          var sourceNote = document.getElementById("trajSourceNote");
+          clearNode(container);
+
+          var tasks = data.tasks || [];
+          if (tasks.length === 0) {
+            metaTitle.textContent = "暂无任务";
+            sourceNote.textContent = "-";
+            return;
+          }
+
+          // 确定展示哪一个任务的轨迹
+          var activeTask = null;
+          if (selectedTaskId) {
+            activeTask = tasks.filter(function (t) {
+              return t.id === selectedTaskId;
+            })[0];
+          }
+          // 默认展示 attention 任务或第一个有 lineage 的任务
+          if (!activeTask) {
+            if (data.attention && data.attention.length > 0) {
+              activeTask = tasks.filter(function (t) {
+                return t.id === data.attention[0];
+              })[0];
+            }
+            if (!activeTask) {
+              activeTask = tasks.filter(function (t) {
+                return (
+                  t.lineage && t.lineage.chain && t.lineage.chain.length > 1
+                );
+              })[0];
+            }
+            if (!activeTask) {
+              activeTask = tasks[0];
+            }
+            if (activeTask) {
+              selectedTaskId = activeTask.id;
+            }
+          }
+
+          if (
+            !activeTask ||
+            !activeTask.lineage ||
+            !activeTask.lineage.chain ||
+            activeTask.lineage.chain.length === 0
+          ) {
+            metaTitle.textContent =
+              (activeTask ? activeTask.id : "") + " · 无轨迹链";
+            sourceNote.textContent = "-";
+            container.appendChild(
+              createEl("div", "empty-state", "该任务尚无流转记录"),
+            );
+            return;
+          }
+
+          var lineage = activeTask.lineage;
+          var chain = lineage.chain;
+          var source = lineage.source || "flow";
+
+          sourceNote.textContent =
+            "lineage: " + (source === "heuristic" ? "heuristic" : "flow.tsv");
+          var chainNames = chain
+            .map(function (h) {
+              return h.task || h.worker;
+            })
+            .join(" → ");
+          metaTitle.textContent =
+            activeTask.id +
+            " (" +
+            (activeTask.title || "") +
+            ") · " +
+            chainNames;
+
+          for (var i = 0; i < chain.length; i++) {
+            var hop = chain[i];
+            var isCurrent = i === chain.length - 1;
+            var hopEl = createEl(
+              "div",
+              "hop-item" + (isCurrent ? " current" : ""),
+            );
+
+            var head = createEl("div", "hop-item-head");
+            var roleName = createEl(
+              "span",
+              "hop-item-role",
+              hop.worker || "worker",
+            );
+
+            // 查找 worker 的 runtime
+            var roster = data.roster || [];
+            var rObj = roster.filter(function (r) {
+              return r.worker === hop.worker;
+            })[0];
+            if (rObj && rObj.runtime) {
+              roleName.appendChild(createEl("span", "rt", rObj.runtime));
+            }
+            head.appendChild(roleName);
+
+            var stateStr = isCurrent ? activeTask.column || "进行中" : "已完成";
+            head.appendChild(createEl("span", "hop-item-state", stateStr));
+            hopEl.appendChild(head);
+
+            var sub = createEl("div", "hop-item-sub");
+            var subText = "任务契约: " + (hop.task || activeTask.id);
+            if (isCurrent && activeTask.worktree) {
+              if (activeTask.worktree.branch)
+                subText += " · " + activeTask.worktree.branch;
+              if (activeTask.worktree.mr)
+                subText += " · MR " + activeTask.worktree.mr;
+            }
+            sub.textContent = subText;
+            hopEl.appendChild(sub);
+
+            container.appendChild(hopEl);
+          }
+        }
+
+        /* ================= 整体全量渲染 ================= */
+        function renderAll(data) {
+          if (!data) return;
+          currentData = data;
+          renderHeader(data);
+          renderBoard(data);
+          renderSidebar(data);
+          renderDetailDrawer(data);
+        }
+
+        /* ================= 任务详情抽屉（goalbuddy 式点击详情） ================= */
+        var detailTaskId = null;
+
+        var COLUMN_LABELS = {
+          todo: "待办 todo",
+          doing: "进行中 doing",
+          blocked: "受阻 blocked",
+          done: "已完成 done",
+        };
+        var NEXT_ROUTE_HINTS = {
+          verify: "验证 — 待 leader 派发独立 verify 任务给另一 worker",
+          rework: "返工 — 待 leader 回派实现 worker 修复",
+          deliver: "交付 — 待 leader 派发 delivery worker 产出用户工件",
+          await_user: "等待用户决策 — leader 已把该阻塞升级给用户",
+          none: "链路终点 — 无后续路由",
+        };
+
+        function findTaskById(data, id) {
+          var list = (data && data.tasks) || [];
+          for (var i = 0; i < list.length; i++) {
+            if (list[i].id === id) return list[i];
+          }
+          return null;
+        }
+
+        function openTaskDetail(id) {
+          detailTaskId = id;
+          selectedTaskId = id; // 同步驱动右侧轨迹面板
+          renderAll(currentData);
+        }
+        function closeTaskDetail() {
+          detailTaskId = null;
+          renderAll(currentData);
+        }
+
+        function detailSection(parent, eyebrowText) {
+          var sec = createEl("div", "detail-section");
+          sec.appendChild(createEl("div", "eyebrow", eyebrowText));
+          parent.appendChild(sec);
+          return sec;
+        }
+
+        function appendKv(pre, key, value) {
+          var k = createEl("span", "k", key);
+          pre.appendChild(k);
+          pre.appendChild(document.createTextNode(" " + value + "\n"));
+        }
+
+        function taskLink(id, label) {
+          var a = createEl("span", "task-link", label || id);
+          a.addEventListener("click", function (e) {
+            e.stopPropagation();
+            openTaskDetail(id);
+          });
+          return a;
+        }
+
+        function renderDetailDrawer(data) {
+          var backdrop = document.getElementById("detailBackdrop");
+          var drawer = document.getElementById("detailDrawer");
+          var body = document.getElementById("detailBody");
+          if (!backdrop || !drawer || !body) return;
+
+          var task = detailTaskId ? findTaskById(data, detailTaskId) : null;
+          if (!task) {
+            drawer.classList.remove("open");
+            backdrop.classList.remove("show");
+            drawer.setAttribute("aria-hidden", "true");
+            return;
+          }
+          drawer.classList.add("open");
+          backdrop.classList.add("show");
+          drawer.setAttribute("aria-hidden", "false");
+
+          /* --- 头部 --- */
+          document.getElementById("detailTaskId").textContent =
+            task.id + " · tasks/" + task.id + ".md";
+          document.getElementById("detailTitle").textContent =
+            task.title || "(无标题)";
+          var chips = document.getElementById("detailChips");
+          clearNode(chips);
+          var stChip = createEl(
+            "span",
+            "state-chip st-" + task.column,
+            COLUMN_LABELS[task.column] || task.column,
+          );
+          chips.appendChild(stChip);
+          if (task.owner) {
+            var rosterRow = ((data && data.roster) || []).filter(function (r) {
+              return r.worker === task.owner;
+            })[0];
+            chips.appendChild(
+              createEl(
+                "span",
+                "state-chip",
+                "owner " +
+                  task.owner +
+                  (rosterRow && rosterRow.runtime
+                    ? " · " + rosterRow.runtime
+                    : ""),
+              ),
+            );
+          } else {
+            chips.appendChild(createEl("span", "state-chip", "未派工"));
+          }
+          var badges = task.badges || [];
+          for (var bi = 0; bi < badges.length; bi++) {
+            chips.appendChild(createBadge(badges[bi]));
+          }
+
+          /* --- 正文 --- */
+          clearNode(body);
+
+          /* 契约说明 */
+          var secDetail = detailSection(body, "契约说明 · contract");
+          if (task.detail) {
+            var dt = createEl("div", "detail-text");
+            dt.textContent = task.detail;
+            secDetail.appendChild(dt);
+          } else {
+            secDetail.appendChild(
+              createEl(
+                "div",
+                "detail-empty",
+                "契约摘要不可用（tasks/" + task.id + ".md 未提供正文）",
+              ),
+            );
+          }
+
+          /* block at（仅受阻时） */
+          var blockerId =
+            task.receipt &&
+            task.receipt.blocker &&
+            task.receipt.blocker !== "none"
+              ? task.receipt.blocker
+              : null;
+          if (task.column === "blocked" || blockerId) {
+            var secBlock = detailSection(body, "block at · 阻塞信息");
+            var box = createEl("div", "block-at-box");
+            var line1 = createEl("div", null, "");
+            line1.appendChild(document.createTextNode("阻塞于 "));
+            if (blockerId) {
+              var blockerTask = findTaskById(data, blockerId);
+              line1.appendChild(
+                blockerTask
+                  ? taskLink(blockerId)
+                  : createEl("span", "mono", blockerId),
+              );
+              if (blockerTask) {
+                line1.appendChild(
+                  document.createTextNode(
+                    " 「" +
+                      (blockerTask.title || "") +
+                      "」（" +
+                      (COLUMN_LABELS[blockerTask.column] ||
+                        blockerTask.column) +
+                      "）",
+                  ),
+                );
+              }
+            } else {
+              line1.appendChild(
+                document.createTextNode("（worktree 状态 blocked，回执未报阻塞项）"),
+              );
+            }
+            box.appendChild(line1);
+            if (task.blocked_since) {
+              box.appendChild(
+                createEl(
+                  "div",
+                  "why",
+                  "阻塞开始于 " + formatTime(task.blocked_since),
+                ),
+              );
+            }
+            if (blockerId) {
+              var blockerTask2 = findTaskById(data, blockerId);
+              if (blockerTask2 && blockerTask2.column === "done") {
+                box.appendChild(
+                  createEl(
+                    "div",
+                    "why",
+                    "注意：阻塞项已完成 — 阻塞条件可能已消除，等待 leader 路由。",
+                  ),
+                );
+              }
+            }
+            secBlock.appendChild(box);
+          }
+
+          /* 回执 */
+          var secReceipt = detailSection(body, "回执 · receipts/" + task.id + ".md");
+          if (task.receipt) {
+            var pre = createEl("div", "detail-kv");
+            appendKv(pre, "status  :", task.receipt.status || "-");
+            appendKv(pre, "verdict :", task.receipt.verdict || "-");
+            appendKv(pre, "blocker :", task.receipt.blocker || "-");
+            appendKv(pre, "next    :", task.receipt.next || "-");
+            appendKv(pre, "artifact:", task.receipt.artifact || "-");
+            pre.appendChild(createEl("span", "k", "DONE " + task.id));
+            secReceipt.appendChild(pre);
+          } else {
+            secReceipt.appendChild(
+              createEl("div", "detail-empty", "尚无回执（任务未完成或未派工）"),
+            );
+          }
+
+          /* worktree */
+          if (task.worktree) {
+            var secWt = detailSection(body, "worktree · worktrees.tsv");
+            var wt = createEl("div", "detail-kv");
+            appendKv(wt, "branch  :", task.worktree.branch || "-");
+            appendKv(wt, "MR      :", task.worktree.mr || "-");
+            appendKv(wt, "status  :", task.worktree.status || "-");
+            secWt.appendChild(wt);
+          }
+
+          /* 执行链路：上游流转 → 当前 → 下游路由 */
+          var secChain = detailSection(body, "执行链路 · 前后关系");
+          var chainWrap = createEl("div", "chain-list");
+          var chain = (task.lineage && task.lineage.chain) || [];
+          for (var ci = 0; ci < chain.length; ci++) {
+            var hop = chain[ci];
+            var isCurrent = hop.task === task.id;
+            var node = createEl(
+              "div",
+              "chain-node" + (isCurrent ? " current" : ""),
+            );
+            var head = createEl("div", "cn-head");
+            head.appendChild(createEl("span", "cn-worker", hop.worker || "?"));
+            var hopTask = findTaskById(data, hop.task);
+            if (hopTask && hop.task !== task.id) {
+              head.appendChild(taskLink(hop.task));
+            } else {
+              head.appendChild(createEl("span", "detail-task-id", hop.task));
+            }
+            node.appendChild(head);
+            var subParts = [];
+            if (hopTask) {
+              subParts.push(COLUMN_LABELS[hopTask.column] || hopTask.column);
+              if (hopTask.receipt && hopTask.receipt.verdict &&
+                  hopTask.receipt.verdict !== "unverified" &&
+                  hopTask.receipt.verdict !== "not_applicable") {
+                subParts.push("verdict " + hopTask.receipt.verdict);
+              }
+            }
+            if (isCurrent) subParts.push("当前任务");
+            if (subParts.length) {
+              node.appendChild(createEl("div", "cn-sub", subParts.join(" · ")));
+            }
+            chainWrap.appendChild(node);
+          }
+          /* 下游：回执 next 路由预告 */
+          if (task.receipt && task.receipt.next && task.receipt.next !== "none") {
+            var futureNode = createEl("div", "chain-node future");
+            var fHead = createEl("div", "cn-head");
+            fHead.appendChild(
+              createEl("span", "cn-worker", "next: " + task.receipt.next),
+            );
+            futureNode.appendChild(fHead);
+            futureNode.appendChild(
+              createEl(
+                "div",
+                "cn-sub",
+                NEXT_ROUTE_HINTS[task.receipt.next] || "",
+              ),
+            );
+            chainWrap.appendChild(futureNode);
+          }
+          secChain.appendChild(chainWrap);
+          if (task.lineage && task.lineage.source === "heuristic") {
+            secChain.appendChild(
+              createEl(
+                "div",
+                "detail-empty",
+                "lineage 来源：heuristic（flow.tsv 缺失，按 id 前缀弱恢复）",
+              ),
+            );
+          }
+
+          /* 被本任务阻塞的下游任务 */
+          var blockedByMe = ((data && data.tasks) || []).filter(function (t) {
+            return (
+              t.id !== task.id &&
+              t.receipt &&
+              t.receipt.blocker === task.id
+            );
+          });
+          if (blockedByMe.length > 0) {
+            var secDown = detailSection(body, "阻塞了以下任务");
+            var row = createEl("div", "role-chip-row");
+            for (var di = 0; di < blockedByMe.length; di++) {
+              row.appendChild(taskLink(blockedByMe[di].id));
+            }
+            secDown.appendChild(row);
+          }
+
+          /* 走过的角色 */
+          var seenWorkers = [];
+          for (var wi = 0; wi < chain.length; wi++) {
+            var w = chain[wi].worker;
+            if (w && seenWorkers.indexOf(w) === -1) seenWorkers.push(w);
+          }
+          if (seenWorkers.length > 0) {
+            var secRoles = detailSection(body, "走过的角色");
+            var roleRow = createEl("div", "role-chip-row");
+            for (var ri = 0; ri < seenWorkers.length; ri++) {
+              roleRow.appendChild(
+                createEl(
+                  "span",
+                  "hop-chip" +
+                    (ri === seenWorkers.length - 1 ? " current" : ""),
+                  seenWorkers[ri],
+                ),
+              );
+            }
+            secRoles.appendChild(roleRow);
+          }
+        }
+
+        document
+          .getElementById("detailCloseBtn")
+          .addEventListener("click", closeTaskDetail);
+        document
+          .getElementById("detailBackdrop")
+          .addEventListener("click", closeTaskDetail);
+        document.addEventListener("keydown", function (e) {
+          if (e.key === "Escape" && detailTaskId) closeTaskDetail();
+        });
+
+        /* ================= API 交互与轮询 ================= */
+        function fetchTeamsList() {
+          if (isMock) {
+            renderTeamSelect([
+              { name: "payments-refactor", status: "active" },
+              { name: "auth-service", status: "idle" },
+            ]);
+            return;
+          }
+          fetch("/api/boards")
+            .then(function (res) {
+              if (!res.ok) return fetch("/api/teams");
+              return res;
+            })
+            .then(function (res) {
+              if (!res.ok) throw new Error("fetch boards status " + res.status);
+              return res.json();
+            })
+            .then(function (resData) {
+              var list = resData.boards || resData.teams || [];
+              renderTeamSelect(list);
+            })
+            .catch(function (err) {
+              console.warn("获取 /api/boards 失败:", err);
+              renderTeamSelect([
+                { name: selectedTeam || "payments-refactor", status: "active" },
+              ]);
+            });
+        }
+
+        function renderTeamSelect(teams) {
+          var select = document.getElementById("teamSelect");
+          clearNode(select);
+
+          if (!teams || teams.length === 0) {
+            var opt = createEl("option", null, "无可用 Board");
+            opt.value = "";
+            select.appendChild(opt);
+            return;
+          }
+
+          for (var i = 0; i < teams.length; i++) {
+            var t = teams[i];
+            var option = createEl(
+              "option",
+              null,
+              t.name + (t.status ? " (" + t.status + ")" : ""),
+            );
+            option.value = t.name;
+            if (selectedTeam && t.name === selectedTeam) {
+              option.selected = true;
+            }
+            select.appendChild(option);
+          }
+
+          select.onchange = function () {
+            var newTeam = select.value;
+            if (!newTeam) return;
+            var newUrl = new URL(window.location.href);
+            newUrl.searchParams.set("board", newTeam);
+            newUrl.searchParams.set("team", newTeam);
+            window.history.pushState({}, "", newUrl.toString());
+            selectedTeam = newTeam;
+            fetchTeamData();
+          };
+        }
+
+        function fetchTeamData() {
+          if (isMock) {
+            isOffline = false;
+            renderAll(MOCK_DATA);
+            return;
+          }
+
+          var apiUrl = "/api/board";
+          if (selectedTeam) {
+            apiUrl += "?board=" + encodeURIComponent(selectedTeam);
+          }
+
+          fetch(apiUrl)
+            .then(function (res) {
+              if (!res.ok) {
+                var fallbackUrl = "/api/team" + (selectedTeam ? "?team=" + encodeURIComponent(selectedTeam) : "");
+                return fetch(fallbackUrl);
+              }
+              return res;
+            })
+            .then(function (res) {
+              if (!res.ok) {
+                throw new Error("HTTP " + res.status);
+              }
+              return res.json();
+            })
+            .then(function (data) {
+              isOffline = false;
+              if (data) {
+                data.board = data.board || data.team || {};
+                data.team = data.team || data.board;
+                data.lanes = data.lanes || data.roster || [];
+                data.roster = data.roster || data.lanes;
+                data.activity = data.activity || data.receipts_feed || [];
+                data.receipts_feed = data.receipts_feed || data.activity;
+              }
+              renderAll(data);
+            })
+            .catch(function (err) {
+              console.warn("轮询 /api/board 失败:", err);
+              isOffline = true;
+              if (!currentData) {
+                renderAll(MOCK_DATA);
+              } else {
+                renderHeader(currentData);
+              }
+            });
+        }
+
+        /* ================= 初始化启动 ================= */
+        function init() {
+          fetchTeamsList();
+          fetchTeamData();
+
+          // 2s 轮询
+          pollTimer = setInterval(function () {
+            fetchTeamData();
+          }, 2000);
+        }
+
+        init();
+      })();
+    </script>
+  </body>
+</html>

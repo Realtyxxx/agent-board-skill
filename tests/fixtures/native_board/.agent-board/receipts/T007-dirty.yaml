@@ -1,0 +1,9 @@
+agent_board_receipt_v1:
+  task: T007-dirty
+  worker: impl-a
+  status: totally-invalid-status
+  verdict: invalid-verdict
+  next: invalid-next
+  blocker: none
+  artifact: none
+  leaked_secret: hunter2

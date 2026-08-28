@@ -1,0 +1,9 @@
+agent_board_receipt_v1:
+  task: T004
+  worker: impl-a
+  status: blocked
+  verdict: unverified
+  next: await_user
+  blocker: T002
+  artifact: none
+  summary: "等待交易表分区优化就绪"

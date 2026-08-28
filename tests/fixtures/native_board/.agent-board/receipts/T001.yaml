@@ -1,0 +1,9 @@
+agent_board_receipt_v1:
+  task: T001
+  worker: impl-a
+  status: completed
+  verdict: pass
+  next: none
+  blocker: none
+  artifact: artifacts/T001.md
+  summary: "退款核心状态机完成"

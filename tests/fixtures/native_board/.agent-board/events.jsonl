@@ -1,0 +1,5 @@
+{"ts":1756366000,"event":"create","task":"T005"}
+{"ts":1756366100,"event":"dispatch","task":"T005","worker":"impl-a","parent":"T001"}
+{"ts":1756366800,"event":"block","task":"T004","blocker":"T002"}
+{"ts":1756366920,"event":"receipt","task":"T005","worker":"impl-a","status":"completed","verdict":"pass","next":"verify"}
+{"ts":1756367000,"event":"handoff","task":"T005-verify","worker":"reviewer","parent":"T005"}

@@ -1,0 +1,9 @@
+agent_board_receipt_v1:
+  task: T005-verify
+  worker: reviewer
+  status: completed
+  verdict: fail
+  next: rework
+  blocker: none
+  artifact: artifacts/T005-verify.md
+  summary: "发现幂等性缺陷，需要返工"

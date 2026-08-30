@@ -169,7 +169,11 @@ def main(argv=None):
         type=int,
         default=8737,
         help="0 picks a free port")
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="bind address; defaults to 0.0.0.0 (reachable from the LAN, "
+             "no auth — pass --host 127.0.0.1 to keep it local-only)")
     args = parser.parse_args(argv)
 
     root_dir = os.path.abspath(args.root_dir)
@@ -183,6 +187,15 @@ def main(argv=None):
     httpd.daemon_threads = True
 
     assigned_port = httpd.server_address[1]
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        print(
+            "agent-board: bound to a non-loopback address — reachable from "
+            "anyone on the LAN, with no authentication. Task titles, "
+            "worker names, and contract text are readable by anyone who "
+            "can reach this port. Pass --host 127.0.0.1 to keep it "
+            "local-only.",
+            file=sys.stderr,
+        )
     print(
         f"agent-board listening on http://{
             args.host}:{assigned_port} (root={root_dir}, adapter={

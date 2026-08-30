@@ -168,6 +168,14 @@ node bin/install.js --codex --force
 
 浏览器打开 `http://127.0.0.1:8737` 即可实时查看任务看板。
 
+默认绑定 `0.0.0.0`，局域网内其他机器也能通过你的局域网 IP 访问（如
+`http://192.168.x.x:8737`）——没有任何鉴权，谁都能读到任务标题、worker
+名字、契约正文。只想本机可见就显式传 `--host 127.0.0.1`：
+
+```bash
+~/.agents/skills/agent-board/board/run-sandboxed.sh --root . --adapter native --port 8737 --host 127.0.0.1
+```
+
 ---
 
 ## 自动化测试套件

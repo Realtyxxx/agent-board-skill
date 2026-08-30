@@ -132,8 +132,11 @@ echo "SECRET_ARTIFACT_TOKEN_67890" > "$TEAM_DIR/artifacts/secret.md"
 
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
 
-# Start server in background for HTTP API testing
-python3 "$SERVE" --teams-root "$TEAMS_ROOT" --port 0 > "$TEST_ROOT/server.log" 2>&1 &
+# Start server in background for HTTP API testing.
+# --host 127.0.0.1 pinned explicitly: the server's own default is now
+# 0.0.0.0 (LAN-visible), but this fixture is throwaway test data and the
+# port-detection sed below matches on a literal 127.0.0.1 log line.
+python3 "$SERVE" --teams-root "$TEAMS_ROOT" --host 127.0.0.1 --port 0 > "$TEST_ROOT/server.log" 2>&1 &
 SERVER_PID=$!
 PORT=""
 for _ in $(seq 1 100); do
@@ -255,9 +258,9 @@ else
   sandbox-exec -f "$PROFILE" /bin/cat "$TEAM_DIR/board.tsv" >/dev/null 2>&1 || fail "board.tsv unreadable"
   pass "Control plane file board.tsv is readable under sandbox-exec"
 
-  # Run live server under sandbox-exec
+  # Run live server under sandbox-exec (same --host 127.0.0.1 pin as above)
   SANDBOX_LOG="$TEST_ROOT/sandbox-live.log"
-  "$LAUNCHER" --teams-root "$TEAMS_ROOT" --mode sandbox-exec --port 0 > "$SANDBOX_LOG" 2>&1 &
+  "$LAUNCHER" --teams-root "$TEAMS_ROOT" --mode sandbox-exec --host 127.0.0.1 --port 0 > "$SANDBOX_LOG" 2>&1 &
   SERVER_PID=$!
   PORT_SB=""
   for _ in $(seq 1 150); do

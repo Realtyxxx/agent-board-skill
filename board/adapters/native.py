@@ -460,6 +460,33 @@ class NativeAdapter(BaseAdapter):
         heuristic_lineage = self._build_heuristic_lineage(
             task_order, known_tasks, owners_map)
 
+        # 5b. Superseded tasks: same rule as the tmux-agent-teams adapter
+        # (see TeamsAdapter.load_board), applied to this adapter's two
+        # explicit parent sources — events[].parent and tasks[].parent —
+        # so the two adapters don't silently diverge. The ID-prefix
+        # heuristic lineage is deliberately excluded: it's a guess, not a
+        # recorded handoff, so it must never downgrade a real blocker.
+        superseding_parents: Set[str] = set()
+        superseded_by: Dict[str, List[str]] = {}
+
+        def _record_supersede(parent_id: Any, child_id: Any) -> None:
+            if not valid_name(parent_id) or not valid_name(child_id):
+                return
+            if parent_id == child_id:
+                return
+            if parent_id not in known_tasks or child_id not in known_tasks:
+                return
+            superseding_parents.add(parent_id)
+            children = superseded_by.setdefault(parent_id, [])
+            if child_id not in children:
+                children.append(child_id)
+
+        for ev in events:
+            if isinstance(ev, dict):
+                _record_supersede(ev.get("parent"), ev.get("task"))
+        for t_id, t_raw in tasks_map.items():
+            _record_supersede(t_raw.get("parent"), t_id)
+
         # 6. Process Receipts and Tasks
         receipts_dir = os.path.join(board_dir, "receipts")
         tasks: List[Dict[str, Any]] = []
@@ -473,6 +500,7 @@ class NativeAdapter(BaseAdapter):
             "doing": 0,
             "blocked": 0,
             "done": 0,
+            "superseded": 0,
         }
 
         for t_id in task_order:
@@ -500,9 +528,19 @@ class NativeAdapter(BaseAdapter):
                 column = "todo"
             elif receipt is not None and receipt["status"] == "completed":
                 column = "done"
+                # A parent pointer also records a routine "go verify this"
+                # dispatch, not just a handoff after a stuck/failed task —
+                # next == "verify" is exactly that routine case, so it must
+                # not be mislabeled as "redone".
+                if t_id in superseding_parents and receipt["next"] != "verify":
+                    badges.append("superseded")
             elif receipt is not None and receipt["status"] in ("blocked", "failed"):
-                column = "blocked"
                 badges.append(f"receipt:{receipt['status']}")
+                if t_id in superseding_parents:
+                    column = "superseded"
+                    badges.append("superseded")
+                else:
+                    column = "blocked"
             elif complete:
                 column = "blocked"
             elif has_task_blocker:
@@ -556,7 +594,7 @@ class NativeAdapter(BaseAdapter):
                 column == "blocked"
                 or (receipt is not None and (receipt["status"] in ("blocked", "failed") or receipt["next"] == "await_user"))
                 or has_task_blocker
-            ):
+            ) and t_id not in superseding_parents:
                 if t_id not in attention:
                     attention.append(t_id)
 
@@ -579,6 +617,7 @@ class NativeAdapter(BaseAdapter):
                     "badges": list(dict.fromkeys(badges)),  # deduplicate
                     "receipt": receipt,
                     "lineage": lineage,
+                    "superseded_by": list(superseded_by.get(t_id, [])),
                     "ext": t_raw.get("ext") if isinstance(t_raw.get("ext"), dict) else {},
                 }
             )
@@ -643,6 +682,8 @@ class NativeAdapter(BaseAdapter):
                 1 for t in tasks if t["owner"] == l_id and t["column"] == "doing")
             lane["blocked_count"] = sum(
                 1 for t in tasks if t["owner"] == l_id and t["column"] == "blocked")
+            lane["superseded_count"] = sum(
+                1 for t in tasks if t["owner"] == l_id and t["column"] == "superseded")
             lane["is_new"] = lane.get("new", False)
 
         # Merge events into activity

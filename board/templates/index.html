@@ -227,7 +227,7 @@
       }
       .board {
         display: grid;
-        grid-template-columns: 210px repeat(4, minmax(160px, 1fr));
+        grid-template-columns: 210px repeat(5, minmax(160px, 1fr));
         min-width: 860px;
       }
 
@@ -353,6 +353,9 @@
       .dot.blocked {
         background: transparent;
         border: 1px dashed var(--accent);
+      }
+      .dot.superseded {
+        background: var(--ink-15);
       }
       .dot.todo {
         background: var(--rule-solid);
@@ -501,6 +504,22 @@
         width: 4px;
         background: var(--accent);
         border-radius: 6px 0 0 6px;
+      }
+
+      /* superseded 样式（已取代：settled history，不是警报——去掉 accent 竖条和虚线，
+         用跟 done 一致的静音配色，避免和真正受阻的任务抢视觉优先级） */
+      .card.superseded {
+        background: var(--done-fill);
+        border-color: var(--rule-solid);
+      }
+      .card.superseded .card-title {
+        color: var(--muted);
+      }
+      .superseded-by {
+        margin-top: 4px;
+        font-family: var(--mono);
+        font-size: 9px;
+        color: var(--soft);
       }
 
       /* done 样式 */
@@ -845,6 +864,10 @@
         background: var(--done-fill);
         border: 1px solid var(--muted);
       }
+      .sw.superseded {
+        background: var(--done-fill);
+        border: 1px solid var(--rule-solid);
+      }
       .sw.lineage {
         background: var(--paper);
         border: 1px solid var(--rule-solid);
@@ -956,6 +979,10 @@
       }
       .state-chip.st-done {
         background: var(--done-fill);
+      }
+      .state-chip.st-superseded {
+        background: var(--done-fill);
+        border-color: var(--rule-solid);
       }
       .detail-body {
         overflow-y: auto;
@@ -1144,6 +1171,9 @@
             >
             <span class="legend-item"
               ><span class="sw done"></span> 已完成</span
+            >
+            <span class="legend-item"
+              ><span class="sw superseded"></span> 已取代（曾受阻，已有后续任务接手，非当前问题）</span
             >
             <span class="legend-item"
               ><span class="sw lineage"></span> lineage 芯片 = 任务在 worker
@@ -1601,8 +1631,20 @@
         }
 
         /* ================= 受控徽标映射 ================= */
-        function createBadge(badgeText) {
+        // muted: true 时（card 是 superseded，即已被后续任务接手的历史记录）
+        // 不套用 alert/fail/rework 的警报配色——那些 receipt:blocked 之类的
+        // 文字仍然如实显示，但它们描述的是历史，不是当前需要处理的问题。
+        function createBadge(badgeText, muted) {
           var b = createEl("span", "badge", badgeText);
+          if (muted) {
+            if (
+              badgeText === "heuristic-lineage" ||
+              badgeText.indexOf("heuristic") !== -1
+            ) {
+              b.className = "badge heuristic";
+            }
+            return b;
+          }
           if (
             badgeText === "receipt:blocked" ||
             badgeText === "worktree:blocked"
@@ -1631,6 +1673,8 @@
           var card = createEl("div", "card");
           if (task.column === "blocked") {
             card.classList.add("blocked");
+          } else if (task.column === "superseded") {
+            card.classList.add("superseded");
           } else if (task.column === "done") {
             card.classList.add("done");
           }
@@ -1675,12 +1719,30 @@
 
           // Badges 徽标
           var badges = task.badges || [];
+          var isSuperseded = task.column === "superseded";
           if (badges.length > 0) {
             var badgesContainer = createEl("div", "badges");
             for (var i = 0; i < badges.length; i++) {
-              badgesContainer.appendChild(createBadge(badges[i]));
+              badgesContainer.appendChild(
+                createBadge(badges[i], isSuperseded),
+              );
             }
             card.appendChild(badgesContainer);
+          }
+
+          // 已取代 → 谁接手了（来自 flow.tsv 的 parent 记录）
+          if (
+            isSuperseded &&
+            task.superseded_by &&
+            task.superseded_by.length > 0
+          ) {
+            card.appendChild(
+              createEl(
+                "div",
+                "superseded-by",
+                "→ " + task.superseded_by.join(", "),
+              ),
+            );
           }
 
           // Lineage 芯片序列
@@ -1719,7 +1781,13 @@
           var tasks = data.tasks || [];
 
           // 计算各状态总任务数（用于列头 WIP）
-          var colCounts = { todo: 0, doing: 0, blocked: 0, done: 0 };
+          var colCounts = {
+            todo: 0,
+            doing: 0,
+            blocked: 0,
+            superseded: 0,
+            done: 0,
+          };
           for (var i = 0; i < tasks.length; i++) {
             var col = tasks[i].column || "todo";
             if (colCounts[col] !== undefined) {
@@ -1735,6 +1803,7 @@
             { key: "todo", name: "待办", sub: "todo" },
             { key: "doing", name: "进行中", sub: "doing" },
             { key: "blocked", name: "受阻", sub: "blocked" },
+            { key: "superseded", name: "已取代", sub: "superseded" },
             { key: "done", name: "已完成", sub: "done" },
           ];
 
@@ -1772,7 +1841,7 @@
           );
           board.appendChild(backlogRoleCell);
 
-          // 待派工的 4 个格子
+          // 待派工的 5 个格子（列数随 columnsConfig 走，别再手写数量）
           // todo 格放 backlogTasks
           var backlogTodoCell = createEl("div", "cell");
           for (var b = 0; b < backlogTasks.length; b++) {
@@ -1780,10 +1849,10 @@
           }
           board.appendChild(backlogTodoCell);
 
-          // 其余 3 格为空
-          board.appendChild(createEl("div", "cell"));
-          board.appendChild(createEl("div", "cell"));
-          board.appendChild(createEl("div", "cell"));
+          // 其余格为空（待派工池只可能有 todo 任务）
+          for (var bc = 1; bc < columnsConfig.length; bc++) {
+            board.appendChild(createEl("div", "cell"));
+          }
 
           // 3. 动态角色泳道（遍历 roster）
           for (var r = 0; r < roster.length; r++) {
@@ -1813,7 +1882,13 @@
             roleCell.appendChild(createEl("div", "role-duty", dutyText));
 
             // 负载统计
-            var wStats = { todo: 0, doing: 0, blocked: 0, done: 0 };
+            var wStats = {
+              todo: 0,
+              doing: 0,
+              blocked: 0,
+              superseded: 0,
+              done: 0,
+            };
             for (var wt = 0; wt < workerTasks.length; wt++) {
               var cKey = workerTasks[wt].column || "todo";
               if (wStats[cKey] !== undefined) wStats[cKey]++;
@@ -1821,6 +1896,8 @@
             var loadParts = [];
             if (wStats.doing > 0) loadParts.push(wStats.doing + " doing");
             if (wStats.blocked > 0) loadParts.push(wStats.blocked + " blocked");
+            if (wStats.superseded > 0)
+              loadParts.push(wStats.superseded + " superseded");
             if (wStats.done > 0) loadParts.push(wStats.done + " done");
             if (wStats.todo > 0) loadParts.push(wStats.todo + " todo");
             var loadStr =
@@ -1904,15 +1981,19 @@
           }
 
           // 兜底：如果 attention 数组为空，但存在 blocked 或 failed 任务，也视为 attention
+          // superseded 任务的 receipt 字段仍是 blocked/failed（历史事实不改），
+          // 靠 column !== "superseded" 挡住，否则五个已被接手的旧阻塞又会
+          // 在这里被 receipt 字段兜底捞回来，重新冒充 attention。
           if (attentionTasks.length === 0) {
             for (var k = 0; k < tasks.length; k++) {
               var t = tasks[k];
               if (
-                t.column === "blocked" ||
-                (t.receipt &&
-                  (t.receipt.status === "blocked" ||
-                    t.receipt.status === "failed" ||
-                    t.receipt.next === "await_user"))
+                t.column !== "superseded" &&
+                (t.column === "blocked" ||
+                  (t.receipt &&
+                    (t.receipt.status === "blocked" ||
+                      t.receipt.status === "failed" ||
+                      t.receipt.next === "await_user")))
               ) {
                 attentionTasks.push(t);
               }
@@ -2215,6 +2296,7 @@
           todo: "待办 todo",
           doing: "进行中 doing",
           blocked: "受阻 blocked",
+          superseded: "已取代 superseded",
           done: "已完成 done",
         };
         var NEXT_ROUTE_HINTS = {

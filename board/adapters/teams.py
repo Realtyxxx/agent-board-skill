@@ -378,6 +378,25 @@ class TeamsAdapter(BaseAdapter):
                 task_order.append(task_id)
         known_tasks = set(task_order)
 
+        # Tasks that appear as the `parent` of another known task in
+        # flow.tsv: someone took over from them. Same field validation as
+        # _build_flow_lineage, so a malformed flow.tsv row can't silently
+        # reclassify a real blocker. superseded_by keeps the child ids (in
+        # first-seen order) so the UI can say who took over, not just that
+        # someone did.
+        superseding_parents: Set[str] = set()
+        superseded_by: Dict[str, List[str]] = {}
+        for row in flow_rows:
+            child_id, parent_id = row[1], row[3]
+            if not valid_name(child_id) or child_id not in known_tasks:
+                continue
+            if not valid_name(parent_id) or parent_id == child_id:
+                continue
+            superseding_parents.add(parent_id)
+            children = superseded_by.setdefault(parent_id, [])
+            if child_id not in children:
+                children.append(child_id)
+
         flow_lineage = self._build_flow_lineage(flow_rows, known_tasks)
         heuristic_order = list(dispatch_order)
         heuristic_order += [t for t in task_order if t not in owners]
@@ -408,6 +427,7 @@ class TeamsAdapter(BaseAdapter):
             "doing": 0,
             "blocked": 0,
             "done": 0,
+            "superseded": 0,
         }
 
         for task_id in task_order:
@@ -420,9 +440,19 @@ class TeamsAdapter(BaseAdapter):
                 column = "todo"
             elif receipt is not None and receipt["status"] == "completed":
                 column = "done"
+                # flow.tsv parent links also record routine "go verify this"
+                # dispatches, not just handoffs after a stuck/failed task —
+                # next == "verify" is exactly that routine case, so it must
+                # not be mislabeled as "redone".
+                if task_id in superseding_parents and receipt["next"] != "verify":
+                    badges.append("superseded")
             elif receipt is not None and receipt["status"] in ("blocked", "failed"):
-                column = "blocked"
                 badges.append("receipt:" + receipt["status"])
+                if task_id in superseding_parents:
+                    column = "superseded"
+                    badges.append("superseded")
+                else:
+                    column = "blocked"
             elif worktree is not None and worktree["status"] == "blocked":
                 column = "blocked"
                 badges.append("worktree:blocked")
@@ -485,6 +515,7 @@ class TeamsAdapter(BaseAdapter):
                     "receipt": receipt,
                     "worktree": worktree,
                     "lineage": {"chain": chain, "source": lineage_source},
+                    "superseded_by": list(superseded_by.get(task_id, [])),
                     "ext": {"worktree": worktree} if worktree else {},
                 }
             )
@@ -492,7 +523,7 @@ class TeamsAdapter(BaseAdapter):
             if receipt is not None and (
                 receipt["status"] in (
                     "blocked", "failed") or receipt["next"] == "await_user"
-            ):
+            ) and task_id not in superseding_parents:
                 if task_id not in attention:
                     attention.append(task_id)
 
@@ -547,6 +578,7 @@ class TeamsAdapter(BaseAdapter):
                     "new": is_new,
                     "doing_count": sum(1 for t in tasks if t["owner"] == name and t["column"] == "doing"),
                     "blocked_count": sum(1 for t in tasks if t["owner"] == name and t["column"] == "blocked"),
+                    "superseded_count": sum(1 for t in tasks if t["owner"] == name and t["column"] == "superseded"),
                     "ext": {
                         "lifecycle": agent.get("lifecycle"),
                         "session": clean_text(meta.get("TEAM_TMUX_SESSION")),

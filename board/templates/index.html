@@ -2567,9 +2567,9 @@
             })
             .catch(function (err) {
               console.warn("获取 /api/boards 失败:", err);
-              renderTeamSelect([
-                { name: selectedTeam || "payments-refactor", status: "active" },
-              ]);
+              // 真实模式下绝不能用 mock 看板名兜底：它会被当成默认 board 自动选中，
+              // 让后续轮询一直指向一个不存在的看板
+              renderTeamSelect(selectedTeam ? [{ name: selectedTeam, status: "" }] : []);
             });
         }
 

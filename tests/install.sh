@@ -44,4 +44,18 @@ node "$INSTALLER" --dir "$TEST_ROOT/link" >/dev/null
 [ -f "$TEST_ROOT/link/agent-board/board/serve.py" ] || fail "symlinked install cannot reach board/serve.py"
 pass "2. default install symlinks the skill"
 
+# 3. --copy into the source tree (directly, or through the skill/board symlink)
+#    must be refused up front instead of recursing into itself. Run against a
+#    scratch copy so a regression cannot flood this checkout.
+SCRATCH="$TEST_ROOT/repo"
+mkdir -p "$SCRATCH"
+cp -a "$REPO_ROOT/bin" "$REPO_ROOT/skill" "$REPO_ROOT/board" "$SCRATCH/"
+for inside in skill/local board/local; do
+  if timeout 20 node "$SCRATCH/bin/install.js" --copy --dir "$SCRATCH/$inside" >/dev/null 2>&1; then
+    fail "--copy --dir $inside was not refused"
+  fi
+  [ -e "$SCRATCH/$inside" ] && fail "--copy --dir $inside created files before refusing"
+done
+pass "3. --copy into the source tree is refused"
+
 pass "install.sh completed all tests successfully"

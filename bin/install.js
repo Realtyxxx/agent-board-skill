@@ -60,6 +60,52 @@ function copyDereferenced(src, dst) {
   }
 }
 
+// Source to link / copy: prefer REPO_ROOT (so SKILL.md, board/, etc. are all present) or SKILL_DIR
+// If SKILL_DIR exists with SKILL.md and board/, use SKILL_DIR, else link REPO_ROOT
+const srcToUse = fs.existsSync(path.join(SKILL_DIR, "SKILL.md"))
+  ? SKILL_DIR
+  : REPO_ROOT;
+
+// Real path of p, resolving symlinks in the part of it that already exists.
+function realpathLoose(p) {
+  const abs = path.resolve(p);
+  const rest = [];
+  let cur = abs;
+  while (!fs.existsSync(cur)) {
+    rest.unshift(path.basename(cur));
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return path.join(fs.realpathSync(cur), ...rest);
+}
+
+// Every real directory the copy will walk, following symlinks (skill/board
+// points at ../board).
+function sourceDirs(src, seen = new Set()) {
+  const real = fs.realpathSync(src);
+  if (seen.has(real) || !fs.statSync(real).isDirectory()) return seen;
+  seen.add(real);
+  for (const entry of fs.readdirSync(real)) {
+    sourceDirs(path.join(real, entry), seen);
+  }
+  return seen;
+}
+
+// A --copy destination inside the source tree would copy itself into itself
+// until ENAMETOOLONG. Check before --force deletes anything.
+if (has("--copy")) {
+  const dirs = sourceDirs(srcToUse);
+  for (let p = realpathLoose(dest); ; p = path.dirname(p)) {
+    if (dirs.has(p)) {
+      console.error(`\x1b[31mCopy destination is inside the source tree: ${dest}\x1b[0m`);
+      console.error("Choose a --dir outside " + fs.realpathSync(REPO_ROOT));
+      process.exit(1);
+    }
+    if (path.dirname(p) === p) break;
+  }
+}
+
 // Check if destination exists (or is a symlink)
 let exists = false;
 try {
@@ -83,12 +129,6 @@ if (exists) {
 }
 
 fs.mkdirSync(root, { recursive: true });
-
-// Source to link / copy: prefer REPO_ROOT (so SKILL.md, board/, etc. are all present) or SKILL_DIR
-// If SKILL_DIR exists with SKILL.md and board/, use SKILL_DIR, else link REPO_ROOT
-const srcToUse = fs.existsSync(path.join(SKILL_DIR, "SKILL.md"))
-  ? SKILL_DIR
-  : REPO_ROOT;
 
 if (has("--copy")) {
   copyDereferenced(srcToUse, dest);

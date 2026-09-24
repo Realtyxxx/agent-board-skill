@@ -2,36 +2,26 @@
 """teams.py — Adapter for tmux-agent-teams .teams/ Data Layer."""
 
 import os
-import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-try:
-    from .base import (
-        BLOCKER_RE,
-        FEED_LIMIT,
-        RECEIPT_NEXT,
-        RECEIPT_STATUS,
-        RECEIPT_VERDICT,
-        TITLE_LIMIT,
-        BaseAdapter,
-        clean_text,
-        read_text,
-        valid_name,
-    )
-except (ImportError, ValueError):
-    from base import (
-        BLOCKER_RE,
-        FEED_LIMIT,
-        RECEIPT_NEXT,
-        RECEIPT_STATUS,
-        RECEIPT_VERDICT,
-        TITLE_LIMIT,
-        BaseAdapter,
-        clean_text,
-        read_text,
-        valid_name,
-    )
+from .base import (
+    BLOCKER_RE,
+    FEED_LIMIT,
+    RECEIPT_NEXT,
+    RECEIPT_STATUS,
+    RECEIPT_VERDICT,
+    BaseAdapter,
+    ancestor_chain,
+    build_heuristic_lineage,
+    clean_text,
+    column_stats,
+    lane_counts,
+    printable_single_line,
+    propagate_rework,
+    read_text,
+    valid_name,
+)
 
 WORKTREE_STATUS = ("working", "blocked", "review", "merged", "closed")
 
@@ -201,9 +191,7 @@ class TeamsAdapter(BaseAdapter):
             return False
         if value == "none":
             return True
-        if "\t" in value or "\n" in value or "\r" in value:
-            return False
-        if any(not (ch == " " or ch.isprintable()) for ch in value):
+        if not printable_single_line(value):
             return False
         return value.endswith("artifacts/" + task_id + ".md")
 
@@ -217,7 +205,7 @@ class TeamsAdapter(BaseAdapter):
         order: List[str] = []
 
         for row in flow_rows:
-            _ts, task_id, worker, parent_id = row[0], row[1], row[2], row[3]
+            task_id, worker, parent_id = row[1], row[2], row[3]
             if not valid_name(task_id) or task_id not in known_tasks:
                 continue
             if not valid_name(worker):
@@ -233,53 +221,10 @@ class TeamsAdapter(BaseAdapter):
         if not worker_of:
             return {}
 
-        def ancestors(task_id: str) -> List[str]:
-            chain = []
-            seen = set()
-            cursor: Optional[str] = task_id
-            while cursor and cursor not in seen:
-                seen.add(cursor)
-                chain.append(cursor)
-                cursor = parent.get(cursor)
-            chain.reverse()
-            return chain
-
-        lineage: Dict[str, List[Dict[str, Any]]] = {}
-        for task_id in order:
-            lineage[task_id] = [
-                {"task": node, "worker": worker_of.get(node)} for node in ancestors(task_id)
-            ]
-        return lineage
-
-    def _heuristic_root(self, task_id: str, known_tasks: Set[str]) -> str:
-        parts = task_id.split("-")
-        for cut in range(len(parts) - 1, 0, -1):
-            candidate = "-".join(parts[:cut])
-            if candidate in known_tasks:
-                return candidate
-        return task_id
-
-    def _build_heuristic_lineage(
-        self,
-        known_tasks: Set[str],
-        order: List[str],
-        owners: Dict[str, Optional[str]],
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        groups: Dict[str, List[str]] = {}
-        for task_id in order:
-            groups.setdefault(
-                self._heuristic_root(
-                    task_id,
-                    known_tasks),
-                []).append(task_id)
-        lineage: Dict[str, List[Dict[str, Any]]] = {}
-        for root, members in groups.items():
-            if root in members and members[0] != root:
-                members = [root] + [t for t in members if t != root]
-            chain = [{"task": t, "worker": owners.get(t)} for t in members]
-            for index, task_id in enumerate(members):
-                lineage[task_id] = chain[: index + 1]
-        return lineage
+        return {
+            task_id: ancestor_chain(task_id, parent, worker_of)
+            for task_id in order
+        }
 
     def _resolve_mode(self, team_dir: str) -> Optional[str]:
         text = read_text(os.path.join(team_dir, "mode.md"), limit=1 << 16)
@@ -294,21 +239,17 @@ class TeamsAdapter(BaseAdapter):
     def load_board(self, board_id: Optional[str] = None) -> Dict[str, Any]:
         """Aggregate .teams data and return Unified Core JSON Contract."""
         teams_root = self._resolve_teams_root()
-        all_teams = self.list_boards()
-        team_names = [t["name"] for t in all_teams]
-
         team_name = board_id
         if team_name is None:
-            if len(team_names) == 1:
-                team_name = team_names[0]
-            elif team_names:
-                team_name = team_names[0]
-            else:
-                team_name = "default"
+            team_names = [t["name"] for t in self.list_boards()]
+            team_name = team_names[0] if team_names else "default"
 
         team_dir = os.path.join(teams_root, team_name)
         warnings: List[str] = []
         meta = read_meta(team_dir)
+        mode = self._resolve_mode(team_dir)
+        team_status = clean_text(meta.get("TEAM_STATUS")) or "unknown"
+        session = clean_text(meta.get("TEAM_TMUX_SESSION"))
 
         # 1. Roster
         agent_rows = read_rows(os.path.join(team_dir, "agents.tsv"), 7)
@@ -381,8 +322,8 @@ class TeamsAdapter(BaseAdapter):
         flow_lineage = self._build_flow_lineage(flow_rows, known_tasks)
         heuristic_order = list(dispatch_order)
         heuristic_order += [t for t in task_order if t not in owners]
-        heuristic_lineage = self._build_heuristic_lineage(
-            known_tasks, heuristic_order, owners)
+        heuristic_lineage = build_heuristic_lineage(
+            heuristic_order, known_tasks, owners)
 
         receipts_dir = os.path.join(team_dir, "receipts")
         tasks: List[Dict[str, Any]] = []
@@ -401,14 +342,6 @@ class TeamsAdapter(BaseAdapter):
             if complete and receipt is None:
                 warnings.append(f"invalid-receipt:{task_id}")
             receipt_by_task[task_id] = (receipt, complete)
-
-        stats = {
-            "total": len(task_order),
-            "todo": 0,
-            "doing": 0,
-            "blocked": 0,
-            "done": 0,
-        }
 
         for task_id in task_order:
             owner = owners.get(task_id)
@@ -466,9 +399,6 @@ class TeamsAdapter(BaseAdapter):
                     if title:
                         break
 
-            if column in stats:
-                stats[column] += 1
-
             tasks.append(
                 {
                     "id": task_id,
@@ -521,19 +451,9 @@ class TeamsAdapter(BaseAdapter):
                     }
                 )
 
-        # Rework detection
-        by_id = {task["id"]: task for task in tasks}
-        for task in tasks:
-            rec = task["receipt"]
-            if rec is None or rec.get("verdict") != "fail":
-                continue
-            chain = task["lineage"]["chain"]
-            if len(chain) < 2:
-                continue
-            target = by_id.get(chain[-2]["task"])
-            if target is not None and "rework" not in target["badges"]:
-                target["badges"].append("rework")
+        propagate_rework(tasks)
 
+        counts = lane_counts(tasks)
         lanes: List[Dict[str, Any]] = []
         for name in roster_names:
             agent = agent_by_name.get(name, {})
@@ -545,11 +465,11 @@ class TeamsAdapter(BaseAdapter):
                     "role": agent.get("role", "worker"),
                     "runtime": agent.get("runtime"),
                     "new": is_new,
-                    "doing_count": sum(1 for t in tasks if t["owner"] == name and t["column"] == "doing"),
-                    "blocked_count": sum(1 for t in tasks if t["owner"] == name and t["column"] == "blocked"),
+                    "doing_count": counts.get(name, {}).get("doing", 0),
+                    "blocked_count": counts.get(name, {}).get("blocked", 0),
                     "ext": {
                         "lifecycle": agent.get("lifecycle"),
-                        "session": clean_text(meta.get("TEAM_TMUX_SESSION")),
+                        "session": session,
                     },
                 }
             )
@@ -561,25 +481,25 @@ class TeamsAdapter(BaseAdapter):
                 "id": team_name,
                 "name": team_name,
                 "title": clean_text(meta.get("TEAM_TASK") or meta.get("TEAM_NAME") or team_name, 120),
-                "status": clean_text(meta.get("TEAM_STATUS")) or "unknown",
-                "mode": self._resolve_mode(team_dir),
+                "status": team_status,
+                "mode": mode,
                 "updated_at": int(time.time()),
-                "ext": {"session": clean_text(meta.get("TEAM_TMUX_SESSION"))},
+                "ext": {"session": session},
             },
             "lanes": lanes,
             "tasks": tasks,
             "attention": attention,
             "activity": activity[:FEED_LIMIT],
-            "stats": stats,
+            "stats": column_stats(tasks),
             "adapter": "tmux-agent-teams",
             "generated_at": int(time.time()),
             "warnings": warnings,
             # Aliases for backwards compatibility
             "team": {
                 "name": team_name,
-                "status": clean_text(meta.get("TEAM_STATUS")) or "unknown",
-                "mode": self._resolve_mode(team_dir),
-                "session": clean_text(meta.get("TEAM_TMUX_SESSION")),
+                "status": team_status,
+                "mode": mode,
+                "session": session,
             },
             "roster": [
                 {

@@ -262,6 +262,22 @@ assert "invalid-detail-path:T011" in data["warnings"], "invalid-detail-path:T011
 print("ok - 5. Detail file and path traversal security verified")
 
 # ---------------------------------------------------------------------------
+# Test 5b: detail_file must not escape the board through a symlink
+# ---------------------------------------------------------------------------
+outside = os.path.join(os.path.dirname(data_dir), "outside-secret.txt")
+with open(outside, "w", encoding="utf-8") as f:
+    f.write("SYMLINK_SECRET_TOKEN")
+os.symlink(outside, os.path.join(data_dir, "notes", "escape.md"))
+with open(os.path.join(data_dir, "tasks", "T012.yaml"), "w", encoding="utf-8") as f:
+    f.write("id: T012\ntitle: Symlink escape\ndetail_file: notes/escape.md\n")
+data_sl = adapter.load_board("demo-native")
+tasks_sl = {t["id"]: t for t in data_sl["tasks"]}
+assert tasks_sl["T012"]["detail"] is None, "symlinked detail_file escaped the board"
+assert "invalid-detail-path:T012" in data_sl["warnings"]
+os.remove(os.path.join(data_dir, "tasks", "T012.yaml"))
+print("ok - 5b. Symlinked detail_file outside the board is refused")
+
+# ---------------------------------------------------------------------------
 # Test 6: Dynamic lane perception
 # ---------------------------------------------------------------------------
 lane_ids = [l["id"] for l in data["lanes"]]

@@ -2584,9 +2584,22 @@
             return;
           }
 
-          // 未指定 board 时默认选第一个，否则多 board 场景下 /api/board 会一直 400
-          if (!selectedTeam) {
+          // 未指定 board，或 URL 里的 board 已不存在（旧书签）时，改选第一个；
+          // 否则会一直轮询一个不存在的 board，/api/board 永远 400
+          var known = false;
+          for (var k = 0; k < teams.length; k++) {
+            if (teams[k].name === selectedTeam) known = true;
+          }
+          if (!known) {
+            var stale = !!selectedTeam;
             selectedTeam = teams[0].name;
+            currentData = null;
+            if (stale) {
+              var fixedUrl = new URL(window.location.href);
+              fixedUrl.searchParams.set("board", selectedTeam);
+              fixedUrl.searchParams.set("team", selectedTeam);
+              window.history.replaceState({}, "", fixedUrl.toString());
+            }
             fetchTeamData();
           }
 

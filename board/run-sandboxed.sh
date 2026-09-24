@@ -239,7 +239,9 @@ fi
 
 bwrap_works() {
   command -v bwrap >/dev/null 2>&1 || return 1
-  bwrap --unshare-all --share-net --ro-bind /usr /usr /usr/bin/true \
+  # Probe with the interpreter we will actually run: /usr/bin/true does not
+  # exist on every distro, and a failed probe silently drops to dev mode.
+  bwrap --unshare-all --share-net --ro-bind / / "$PYTHON_REAL" -c '' \
     >/dev/null 2>&1
 }
 

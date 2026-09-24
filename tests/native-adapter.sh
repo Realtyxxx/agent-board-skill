@@ -307,6 +307,33 @@ for p in mount_paths:
     assert "/artifacts" not in p, f"artifacts found in mount_paths: {p}"
 print("ok - 9. get_mount_paths excludes artifacts")
 
+# ---------------------------------------------------------------------------
+# Test 10: multi-board root — listed names must resolve back to their board,
+# even when board.name differs from the directory name
+# ---------------------------------------------------------------------------
+multi_root = os.path.join(os.path.dirname(data_dir), "multi")
+for sub, yaml_text in (
+    ("projA", "board:\n  name: alpha\ntasks:\n  - id: T1\n    title: one\n"),
+    ("projB", "board:\n  name: My Board\n"),
+):
+    d = os.path.join(multi_root, sub, ".agent-board")
+    os.makedirs(d)
+    with open(os.path.join(d, "board.yaml"), "w", encoding="utf-8") as f:
+        f.write(yaml_text)
+multi = NativeAdapter(multi_root)
+names = [b["name"] for b in multi.list_boards()]
+assert names == ["projA", "projB"], f"unexpected multi-board names: {names}"
+data_a = multi.load_board("projA")
+assert [t["id"] for t in data_a["tasks"]] == ["T1"], data_a["tasks"]
+assert data_a["board"]["id"] == "projA" and data_a["board"]["name"] == "alpha"
+
+# Single board whose board.name is not a safe identifier still lists a
+# servable name
+single_root = os.path.join(multi_root, "projB")
+single_names = [b["name"] for b in NativeAdapter(single_root).list_boards()]
+assert single_names == ["projB"], f"unexpected single-board name: {single_names}"
+print("ok - 10. Multi-board names resolve to their own board")
+
 print("\nALL NATIVE ADAPTER TESTS PASSED CLEANLY.")
 EOF
 

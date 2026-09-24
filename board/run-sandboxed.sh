@@ -19,7 +19,7 @@
 
 set -uo pipefail
 
-BOARD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BOARD_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)
 SERVE="$BOARD_DIR/serve.py"
 REPO_ROOT=$(cd "$BOARD_DIR/.." && pwd -P)
 export PYTHONPATH="$REPO_ROOT:${PYTHONPATH:-}"
@@ -156,14 +156,10 @@ add_bind() {
   BIND_DST+=("$2")
 }
 
-# The whole board/ directory
+# Only board/ itself. Never bind its parent ($REPO_ROOT): the data root (and
+# its artifacts/) may live underneath it. bwrap creates the empty parent
+# directories, which is all `import board.*` needs.
 add_bind "$BOARD_DIR" "$BOARD_DIR"
-
-# Top-level repo root if board is a submodule/subdirectory (for imports)
-REPO_ROOT=$(cd "$BOARD_DIR/.." && pwd -P)
-if [ -d "$REPO_ROOT/board" ]; then
-  add_bind "$REPO_ROOT" "$REPO_ROOT"
-fi
 
 # Detect data mode
 IS_TEAMS=0
@@ -309,6 +305,8 @@ emit_sandbox_profile() {
     fi
   done
 
+  # Directory listing only (literal), so Python can import board.* from it.
+  printf '(allow file-read* (literal %s))\n' "$(sb_quote "$REPO_ROOT")"
   printf '(allow file-read* (literal %s))\n' "$(sb_quote "$DATA_ROOT")"
   local sub_path sub_name
   for sub_path in "$DATA_ROOT"/*; do

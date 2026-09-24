@@ -183,10 +183,10 @@ def main(argv=None):
     httpd.daemon_threads = True
 
     assigned_port = httpd.server_address[1]
+    adapter_name = adapter.__class__.__name__
     print(
-        f"agent-board listening on http://{
-            args.host}:{assigned_port} (root={root_dir}, adapter={
-            adapter.__class__.__name__})",
+        f"agent-board listening on http://{args.host}:{assigned_port} "
+        f"(root={root_dir}, adapter={adapter_name})",
         flush=True,
     )
 

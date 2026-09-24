@@ -99,40 +99,12 @@ class NativeAdapter(BaseAdapter):
         if os.path.isfile(os.path.join(self.root_dir, "board.yaml")) or os.path.isfile(
             os.path.join(self.root_dir, "board.json")
         ):
-            b_data = _load_data_file(os.path.join(self.root_dir, "board.yaml")) or _load_data_file(
-                os.path.join(self.root_dir, "board.json")
-            )
-            b_meta = b_data.get(
-                "board",
-                {}) if isinstance(
-                b_data,
-                dict) else {}
-            name = (
-                b_meta.get("name")
-                or os.path.basename(self.root_dir).lstrip(".")
-                or "default"
-            )
-            status = b_meta.get("status", "active")
-            boards.append({"name": name, "status": status})
+            boards.append(self._single_board_entry(self.root_dir))
             return boards
 
         dot_ab = os.path.join(self.root_dir, ".agent-board")
         if os.path.isdir(dot_ab):
-            b_data = _load_data_file(os.path.join(dot_ab, "board.yaml")) or _load_data_file(
-                os.path.join(dot_ab, "board.json")
-            )
-            b_meta = b_data.get(
-                "board",
-                {}) if isinstance(
-                b_data,
-                dict) else {}
-            name = (
-                b_meta.get("name")
-                or os.path.basename(self.root_dir).lstrip(".")
-                or "default"
-            )
-            status = b_meta.get("status", "active")
-            boards.append({"name": name, "status": status})
+            boards.append(self._single_board_entry(dot_ab))
             return boards
 
         # Scan subdirectories
@@ -153,14 +125,36 @@ class NativeAdapter(BaseAdapter):
                 os.path.join(target, "board.json")
             )
             if isinstance(b_data, dict) and "board" in b_data:
-                b_meta = b_data.get("board", {})
+                b_meta = b_data.get("board")
+                if not isinstance(b_meta, dict):
+                    b_meta = {}
+                # The directory name is the id load_board() resolves by;
+                # board.name is display-only here.
                 boards.append(
                     {
-                        "name": b_meta.get("name", entry),
+                        "name": entry,
                         "status": b_meta.get("status", "active"),
                     }
                 )
         return boards
+
+    def _single_board_entry(self, board_dir: str) -> Dict[str, Any]:
+        """List entry for a root that is itself a single board.
+
+        The name must pass valid_name(), or serve.py rejects it with 400.
+        """
+        b_data = _load_data_file(os.path.join(board_dir, "board.yaml")) or _load_data_file(
+            os.path.join(board_dir, "board.json")
+        )
+        b_meta = b_data.get("board") if isinstance(b_data, dict) else None
+        if not isinstance(b_meta, dict):
+            b_meta = {}
+        name = b_meta.get("name")
+        if not valid_name(name):
+            name = os.path.basename(self.root_dir).lstrip(".")
+        if not valid_name(name):
+            name = "default"
+        return {"name": name, "status": b_meta.get("status", "active")}
 
     def _parse_receipt(
         self,
@@ -662,7 +656,7 @@ class NativeAdapter(BaseAdapter):
 
         payload = {
             "board": {
-                "id": board_name,
+                "id": board_id or board_name,
                 "name": board_name,
                 "title": board_title,
                 "status": board_status,

@@ -7,11 +7,12 @@
     "agent-board-install": "bin/install.js"
   },
   "scripts": {
-    "test": "bash tests/miniyaml.sh && bash tests/native-adapter.sh && bash tests/teams-adapter.sh && bash tests/board-sandbox.sh",
+    "test": "bash tests/miniyaml.sh && bash tests/native-adapter.sh && bash tests/teams-adapter.sh && bash tests/board-sandbox.sh && bash tests/install.sh",
     "test:miniyaml": "bash tests/miniyaml.sh",
     "test:native": "bash tests/native-adapter.sh",
     "test:teams": "bash tests/teams-adapter.sh",
     "test:sandbox": "bash tests/board-sandbox.sh",
+    "test:install": "bash tests/install.sh",
     "install-skill": "node bin/install.js --force"
   },
   "keywords": [

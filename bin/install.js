@@ -44,6 +44,22 @@ if (dirIdx !== -1) {
 
 const dest = path.join(root, SKILL_NAME);
 
+// skill/board is a relative symlink. fs.cpSync rewrites nested symlinks to
+// absolute links back into this repo (its `dereference` option only covers the
+// top-level source), so copy by hand, following links.
+function copyDereferenced(src, dst) {
+  const st = fs.statSync(src);
+  if (st.isDirectory()) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const entry of fs.readdirSync(src)) {
+      copyDereferenced(path.join(src, entry), path.join(dst, entry));
+    }
+  } else {
+    fs.copyFileSync(src, dst);
+    fs.chmodSync(dst, st.mode & 0o777);
+  }
+}
+
 // Check if destination exists (or is a symlink)
 let exists = false;
 try {
@@ -75,7 +91,7 @@ const srcToUse = fs.existsSync(path.join(SKILL_DIR, "SKILL.md"))
   : REPO_ROOT;
 
 if (has("--copy")) {
-  fs.cpSync(srcToUse, dest, { recursive: true });
+  copyDereferenced(srcToUse, dest);
   console.log(`\x1b[32m✔ Copied ${SKILL_NAME} skill → ${dest}\x1b[0m`);
 } else {
   fs.symlinkSync(srcToUse, dest, "dir");

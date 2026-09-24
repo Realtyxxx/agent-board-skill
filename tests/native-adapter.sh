@@ -350,6 +350,18 @@ single_names = [b["name"] for b in NativeAdapter(single_root).list_boards()]
 assert single_names == ["projB"], f"unexpected single-board name: {single_names}"
 print("ok - 10. Multi-board names resolve to their own board")
 
+# ---------------------------------------------------------------------------
+# Test 11: a malformed non-scalar owner must not take the whole board down
+# ---------------------------------------------------------------------------
+bad_root = os.path.join(os.path.dirname(data_dir), "bad-owner")
+os.makedirs(os.path.join(bad_root, ".agent-board"))
+with open(os.path.join(bad_root, ".agent-board", "board.yaml"), "w", encoding="utf-8") as f:
+    f.write("board:\n  name: bad\ntasks:\n  - id: T1\n    owner: [x, y]\n  - id: T2\n    owner: ok\n")
+data_bad = NativeAdapter(bad_root).load_board("bad")
+lanes_bad = {l["id"]: l for l in data_bad["lanes"]}
+assert lanes_bad["ok"]["doing_count"] == 1, lanes_bad
+print("ok - 11. Non-scalar owner does not crash load_board")
+
 print("\nALL NATIVE ADAPTER TESTS PASSED CLEANLY.")
 EOF
 

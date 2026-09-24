@@ -123,7 +123,9 @@ def lane_counts(tasks: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
     """Per-owner doing/blocked counts in a single pass."""
     counts: Dict[str, Dict[str, int]] = {}
     for task in tasks:
-        if task["column"] in ("doing", "blocked") and task["owner"]:
+        # Lane ids are strings; a malformed non-scalar owner (e.g. a YAML
+        # list) is unhashable and can never match a lane anyway.
+        if task["column"] in ("doing", "blocked") and isinstance(task["owner"], str) and task["owner"]:
             per = counts.setdefault(task["owner"], {"doing": 0, "blocked": 0})
             per[task["column"]] += 1
     return counts

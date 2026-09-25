@@ -1510,12 +1510,17 @@
 
         /* ================= 状态变量 ================= */
         var urlParams = new URLSearchParams(window.location.search);
-        var isMock = urlParams.get("mock") !== "0"; // 模板版：mock 默认开启，?mock=0 关闭
-        var selectedTeam = urlParams.get("team") || "";
+        // mock 仅在 ?mock=1 时开启；直接用 file:// 打开模板时默认开启（无 API 可连），?mock=0 关闭
+        var isMock =
+          urlParams.get("mock") === "1" ||
+          (window.location.protocol === "file:" && urlParams.get("mock") !== "0");
+        var selectedTeam = urlParams.get("board") || urlParams.get("team") || "";
         var currentData = null;
         var selectedTaskId = null;
         var isOffline = false;
         var pollTimer = null;
+        var POLL_INTERVAL_MS = 2000;
+        var fetchSeq = 0; // 只渲染最新一次请求的结果（切换 board 时丢弃旧响应）
 
         /* ================= 安全 DOM 构建工具函数（纯 textContent 拼装，绝不 innerHTML） ================= */
         function clearNode(node) {
@@ -2562,9 +2567,9 @@
             })
             .catch(function (err) {
               console.warn("获取 /api/boards 失败:", err);
-              renderTeamSelect([
-                { name: selectedTeam || "payments-refactor", status: "active" },
-              ]);
+              // 真实模式下绝不能用 mock 看板名兜底：它会被当成默认 board 自动选中，
+              // 让后续轮询一直指向一个不存在的看板
+              renderTeamSelect(selectedTeam ? [{ name: selectedTeam, status: "" }] : []);
             });
         }
 
@@ -2577,6 +2582,25 @@
             opt.value = "";
             select.appendChild(opt);
             return;
+          }
+
+          // 未指定 board，或 URL 里的 board 已不存在（旧书签）时，改选第一个；
+          // 否则会一直轮询一个不存在的 board，/api/board 永远 400
+          var known = false;
+          for (var k = 0; k < teams.length; k++) {
+            if (teams[k].name === selectedTeam) known = true;
+          }
+          if (!known) {
+            var stale = !!selectedTeam;
+            selectedTeam = teams[0].name;
+            currentData = null;
+            if (stale) {
+              var fixedUrl = new URL(window.location.href);
+              fixedUrl.searchParams.set("board", selectedTeam);
+              fixedUrl.searchParams.set("team", selectedTeam);
+              window.history.replaceState({}, "", fixedUrl.toString());
+            }
+            fetchTeamData();
           }
 
           for (var i = 0; i < teams.length; i++) {
@@ -2601,6 +2625,7 @@
             newUrl.searchParams.set("team", newTeam);
             window.history.pushState({}, "", newUrl.toString());
             selectedTeam = newTeam;
+            currentData = null; // 新 board 出错时不要继续展示旧 board 的数据
             fetchTeamData();
           };
         }
@@ -2610,6 +2635,11 @@
             isOffline = false;
             renderAll(MOCK_DATA);
             return;
+          }
+
+          var seq = ++fetchSeq;
+          function isStale() {
+            return seq !== fetchSeq;
           }
 
           var apiUrl = "/api/board";
@@ -2632,6 +2662,7 @@
               return res.json();
             })
             .then(function (data) {
+              if (isStale()) return;
               isOffline = false;
               if (data) {
                 data.board = data.board || data.team || {};
@@ -2644,14 +2675,40 @@
               renderAll(data);
             })
             .catch(function (err) {
+              if (isStale()) return;
               console.warn("轮询 /api/board 失败:", err);
               isOffline = true;
-              if (!currentData) {
-                renderAll(MOCK_DATA);
-              } else {
-                renderHeader(currentData);
-              }
+              // 真实服务出错时不能回落到 MOCK_DATA，否则会把假数据当成真看板展示
+              renderAll(currentData || emptyData());
+            })
+            .then(function () {
+              if (!isStale()) scheduleNextPoll();
             });
+        }
+
+        function emptyData() {
+          var name = selectedTeam || "—";
+          return {
+            board: { name: name, title: name, status: "unknown" },
+            team: { name: name, status: "unknown" },
+            lanes: [],
+            roster: [],
+            tasks: [],
+            attention: [],
+            activity: [],
+            receipts_feed: [],
+            stats: { total: 0, todo: 0, doing: 0, blocked: 0, done: 0 },
+            warnings: [],
+          };
+        }
+
+        // 串行轮询：上一次请求结束后才排下一次，慢请求不会堆积；标签页隐藏时暂停
+        function scheduleNextPoll() {
+          if (isMock) return;
+          clearTimeout(pollTimer);
+          pollTimer = null;
+          if (document.hidden) return;
+          pollTimer = setTimeout(fetchTeamData, POLL_INTERVAL_MS);
         }
 
         /* ================= 初始化启动 ================= */
@@ -2659,10 +2716,9 @@
           fetchTeamsList();
           fetchTeamData();
 
-          // 2s 轮询
-          pollTimer = setInterval(function () {
-            fetchTeamData();
-          }, 2000);
+          document.addEventListener("visibilitychange", function () {
+            if (!document.hidden && !isMock) fetchTeamData();
+          });
         }
 
         init();

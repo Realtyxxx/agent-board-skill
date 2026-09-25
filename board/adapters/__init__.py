@@ -3,14 +3,9 @@
 import os
 from typing import Optional
 
-try:
-    from .base import BaseAdapter
-    from .native import NativeAdapter
-    from .teams import TeamsAdapter
-except (ImportError, ValueError):
-    from base import BaseAdapter
-    from native import NativeAdapter
-    from teams import TeamsAdapter
+from .base import BaseAdapter
+from .native import NativeAdapter
+from .teams import TeamsAdapter
 
 __all__ = ["BaseAdapter", "NativeAdapter", "TeamsAdapter", "get_adapter"]
 

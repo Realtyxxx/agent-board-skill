@@ -3,7 +3,6 @@
 
 import json
 import os
-import re
 import time
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -12,32 +11,24 @@ try:
 except (ImportError, ValueError):
     from miniyaml import safe_load_file
 
-try:
-    from .base import (
-        BLOCKER_RE,
-        FEED_LIMIT,
-        RECEIPT_NEXT,
-        RECEIPT_STATUS,
-        RECEIPT_VERDICT,
-        TITLE_LIMIT,
-        BaseAdapter,
-        clean_text,
-        read_text,
-        valid_name,
-    )
-except (ImportError, ValueError):
-    from base import (
-        BLOCKER_RE,
-        FEED_LIMIT,
-        RECEIPT_NEXT,
-        RECEIPT_STATUS,
-        RECEIPT_VERDICT,
-        TITLE_LIMIT,
-        BaseAdapter,
-        clean_text,
-        read_text,
-        valid_name,
-    )
+from .base import (
+    BLOCKER_RE,
+    FEED_LIMIT,
+    RECEIPT_NEXT,
+    RECEIPT_STATUS,
+    RECEIPT_VERDICT,
+    TITLE_LIMIT,
+    BaseAdapter,
+    ancestor_chain,
+    build_heuristic_lineage,
+    clean_text,
+    column_stats,
+    lane_counts,
+    printable_single_line,
+    propagate_rework,
+    read_text,
+    valid_name,
+)
 
 
 def _load_data_file(path: str) -> Any:
@@ -99,40 +90,12 @@ class NativeAdapter(BaseAdapter):
         if os.path.isfile(os.path.join(self.root_dir, "board.yaml")) or os.path.isfile(
             os.path.join(self.root_dir, "board.json")
         ):
-            b_data = _load_data_file(os.path.join(self.root_dir, "board.yaml")) or _load_data_file(
-                os.path.join(self.root_dir, "board.json")
-            )
-            b_meta = b_data.get(
-                "board",
-                {}) if isinstance(
-                b_data,
-                dict) else {}
-            name = (
-                b_meta.get("name")
-                or os.path.basename(self.root_dir).lstrip(".")
-                or "default"
-            )
-            status = b_meta.get("status", "active")
-            boards.append({"name": name, "status": status})
+            boards.append(self._single_board_entry(self.root_dir))
             return boards
 
         dot_ab = os.path.join(self.root_dir, ".agent-board")
         if os.path.isdir(dot_ab):
-            b_data = _load_data_file(os.path.join(dot_ab, "board.yaml")) or _load_data_file(
-                os.path.join(dot_ab, "board.json")
-            )
-            b_meta = b_data.get(
-                "board",
-                {}) if isinstance(
-                b_data,
-                dict) else {}
-            name = (
-                b_meta.get("name")
-                or os.path.basename(self.root_dir).lstrip(".")
-                or "default"
-            )
-            status = b_meta.get("status", "active")
-            boards.append({"name": name, "status": status})
+            boards.append(self._single_board_entry(dot_ab))
             return boards
 
         # Scan subdirectories
@@ -153,14 +116,36 @@ class NativeAdapter(BaseAdapter):
                 os.path.join(target, "board.json")
             )
             if isinstance(b_data, dict) and "board" in b_data:
-                b_meta = b_data.get("board", {})
+                b_meta = b_data.get("board")
+                if not isinstance(b_meta, dict):
+                    b_meta = {}
+                # The directory name is the id load_board() resolves by;
+                # board.name is display-only here.
                 boards.append(
                     {
-                        "name": b_meta.get("name", entry),
+                        "name": entry,
                         "status": b_meta.get("status", "active"),
                     }
                 )
         return boards
+
+    def _single_board_entry(self, board_dir: str) -> Dict[str, Any]:
+        """List entry for a root that is itself a single board.
+
+        The name must pass valid_name(), or serve.py rejects it with 400.
+        """
+        b_data = _load_data_file(os.path.join(board_dir, "board.yaml")) or _load_data_file(
+            os.path.join(board_dir, "board.json")
+        )
+        b_meta = b_data.get("board") if isinstance(b_data, dict) else None
+        if not isinstance(b_meta, dict):
+            b_meta = {}
+        name = b_meta.get("name")
+        if not valid_name(name):
+            name = os.path.basename(self.root_dir).lstrip(".")
+        if not valid_name(name):
+            name = "default"
+        return {"name": name, "status": b_meta.get("status", "active")}
 
     def _parse_receipt(
         self,
@@ -243,13 +228,21 @@ class NativeAdapter(BaseAdapter):
             return True
         if not isinstance(value, str):
             return False
-        if "\t" in value or "\n" in value or "\r" in value:
-            return False
-        if any(not (ch == " " or ch.isprintable()) for ch in value):
+        if not printable_single_line(value):
             return False
         # Allow safe relative artifact path ending in task_id
         return value.endswith(
             f"artifacts/{task_id}.md") or value.endswith(f"artifacts/{task_id}.yaml") or "/" not in value
+
+    @staticmethod
+    def _inside(path: str, base: str) -> bool:
+        """True if path, after resolving symlinks, stays within base."""
+        real_base = os.path.realpath(base)
+        real_path = os.path.realpath(path)
+        try:
+            return os.path.commonpath([real_path, real_base]) == real_base
+        except ValueError:
+            return False
 
     def _build_events_lineage(
         self,
@@ -263,7 +256,6 @@ class NativeAdapter(BaseAdapter):
         for ev in events:
             if not isinstance(ev, dict):
                 continue
-            ev_type = ev.get("event")
             t_id = ev.get("task")
             w_id = ev.get("worker")
             p_id = ev.get("parent")
@@ -276,19 +268,8 @@ class NativeAdapter(BaseAdapter):
 
         lineage_map: Dict[str, List[Dict[str, Any]]] = {}
         for t_id in known_tasks:
-            if t_id in parent_map or t_id in worker_map:
-                chain = []
-                seen = set()
-                curr: Optional[str] = t_id
-                while curr and curr not in seen:
-                    seen.add(curr)
-                    chain.append(
-                        {"task": curr, "worker": worker_map.get(curr)})
-                    curr = parent_map.get(curr)
-                chain.reverse()
-                if len(chain) > 1 or t_id in parent_map:
-                    lineage_map[t_id] = chain
-
+            if t_id in parent_map:
+                lineage_map[t_id] = ancestor_chain(t_id, parent_map, worker_map)
         return lineage_map
 
     def _build_parent_field_lineage(
@@ -305,51 +286,11 @@ class NativeAdapter(BaseAdapter):
             if p and valid_name(p) and p != t_id:
                 parent_map[t_id] = p
 
-        lineage_map: Dict[str, List[Dict[str, Any]]] = {}
-        for t_id in tasks_dict:
-            if t_id in parent_map:
-                chain = []
-                seen = set()
-                curr: Optional[str] = t_id
-                while curr and curr not in seen:
-                    seen.add(curr)
-                    chain.append(
-                        {"task": curr, "worker": worker_map.get(curr)})
-                    curr = parent_map.get(curr)
-                chain.reverse()
-                lineage_map[t_id] = chain
-
-        return lineage_map
-
-    def _heuristic_root(self, task_id: str, known_tasks: Set[str]) -> str:
-        """Level 3 Lineage: ID prefix heuristic (e.g. T005-verify -> T005)."""
-        parts = task_id.split("-")
-        for cut in range(len(parts) - 1, 0, -1):
-            candidate = "-".join(parts[:cut])
-            if candidate in known_tasks:
-                return candidate
-        return task_id
-
-    def _build_heuristic_lineage(
-        self,
-        task_order: List[str],
-        known_tasks: Set[str],
-        owners: Dict[str, Optional[str]],
-    ) -> Dict[str, List[Dict[str, Any]]]:
-        """Group tasks by heuristic root."""
-        groups: Dict[str, List[str]] = {}
-        for t_id in task_order:
-            root = self._heuristic_root(t_id, known_tasks)
-            groups.setdefault(root, []).append(t_id)
-
-        lineage_map: Dict[str, List[Dict[str, Any]]] = {}
-        for root, members in groups.items():
-            if root in members and members[0] != root:
-                members = [root] + [t for t in members if t != root]
-            chain = [{"task": t, "worker": owners.get(t)} for t in members]
-            for idx, t_id in enumerate(members):
-                lineage_map[t_id] = chain[: idx + 1]
-        return lineage_map
+        return {
+            t_id: ancestor_chain(t_id, parent_map, worker_map)
+            for t_id in tasks_dict
+            if t_id in parent_map
+        }
 
     def load_board(self, board_id: Optional[str] = None) -> Dict[str, Any]:
         """Aggregate .agent-board data and return Unified Core JSON Contract."""
@@ -457,7 +398,7 @@ class NativeAdapter(BaseAdapter):
         parent_field_lineage = self._build_parent_field_lineage(tasks_map)
         owners_map = {t_id: tasks_map[t_id].get(
             "owner") for t_id in task_order}
-        heuristic_lineage = self._build_heuristic_lineage(
+        heuristic_lineage = build_heuristic_lineage(
             task_order, known_tasks, owners_map)
 
         # 6. Process Receipts and Tasks
@@ -466,14 +407,6 @@ class NativeAdapter(BaseAdapter):
         attention: List[str] = []
         activity: List[Dict[str, Any]] = []
         seen_owners: Set[str] = set()
-
-        stats = {
-            "total": len(task_order),
-            "todo": 0,
-            "doing": 0,
-            "blocked": 0,
-            "done": 0,
-        }
 
         for t_id in task_order:
             t_raw = tasks_map[t_id]
@@ -546,7 +479,12 @@ class NativeAdapter(BaseAdapter):
                     detail = None
                 else:
                     df_path = os.path.join(board_dir, clean_df)
-                    if os.path.isfile(df_path):
+                    if not self._inside(df_path, board_dir):
+                        # A symlink somewhere on the path points outside
+                        # the board; unsandboxed, this would read any file.
+                        warnings.append(f"invalid-detail-path:{t_id}")
+                        detail = None
+                    elif os.path.isfile(df_path):
                         detail = read_text(df_path, limit=1 << 16)
                     else:
                         detail = None
@@ -559,10 +497,6 @@ class NativeAdapter(BaseAdapter):
             ):
                 if t_id not in attention:
                     attention.append(t_id)
-
-            # Update stats
-            if column in stats:
-                stats[column] += 1
 
             tasks.append(
                 {
@@ -610,16 +544,7 @@ class NativeAdapter(BaseAdapter):
                 )
 
         # 7. Rework propagation for verdict: fail
-        task_by_id = {t["id"]: t for t in tasks}
-        for t in tasks:
-            rec = t["receipt"]
-            if rec and rec.get("verdict") == "fail":
-                chain = t["lineage"]["chain"]
-                if len(chain) >= 2:
-                    pred_id = chain[-2]["task"]
-                    if pred_id in task_by_id:
-                        if "rework" not in task_by_id[pred_id]["badges"]:
-                            task_by_id[pred_id]["badges"].append("rework")
+        propagate_rework(tasks)
 
         # 8. Dynamic Lane addition for undeclared owners
         for o in sorted(seen_owners):
@@ -637,12 +562,11 @@ class NativeAdapter(BaseAdapter):
                 )
 
         # Count active tasks per lane
+        counts = lane_counts(tasks)
         for lane in lanes:
-            l_id = lane["id"]
-            lane["doing_count"] = sum(
-                1 for t in tasks if t["owner"] == l_id and t["column"] == "doing")
-            lane["blocked_count"] = sum(
-                1 for t in tasks if t["owner"] == l_id and t["column"] == "blocked")
+            per = counts.get(lane["id"], {})
+            lane["doing_count"] = per.get("doing", 0)
+            lane["blocked_count"] = per.get("blocked", 0)
             lane["is_new"] = lane.get("new", False)
 
         # Merge events into activity
@@ -662,7 +586,7 @@ class NativeAdapter(BaseAdapter):
 
         payload = {
             "board": {
-                "id": board_name,
+                "id": board_id or board_name,
                 "name": board_name,
                 "title": board_title,
                 "status": board_status,
@@ -675,7 +599,7 @@ class NativeAdapter(BaseAdapter):
             "tasks": tasks,
             "attention": attention,
             "activity": activity[:FEED_LIMIT],
-            "stats": stats,
+            "stats": column_stats(tasks),
             "adapter": "native",
             "generated_at": int(time.time()),
             "warnings": warnings,

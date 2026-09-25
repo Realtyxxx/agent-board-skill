@@ -44,6 +44,68 @@ if (dirIdx !== -1) {
 
 const dest = path.join(root, SKILL_NAME);
 
+// skill/board is a relative symlink. fs.cpSync rewrites nested symlinks to
+// absolute links back into this repo (its `dereference` option only covers the
+// top-level source), so copy by hand, following links.
+function copyDereferenced(src, dst) {
+  const st = fs.statSync(src);
+  if (st.isDirectory()) {
+    fs.mkdirSync(dst, { recursive: true });
+    for (const entry of fs.readdirSync(src)) {
+      copyDereferenced(path.join(src, entry), path.join(dst, entry));
+    }
+  } else {
+    fs.copyFileSync(src, dst);
+    fs.chmodSync(dst, st.mode & 0o777);
+  }
+}
+
+// Source to link / copy: prefer REPO_ROOT (so SKILL.md, board/, etc. are all present) or SKILL_DIR
+// If SKILL_DIR exists with SKILL.md and board/, use SKILL_DIR, else link REPO_ROOT
+const srcToUse = fs.existsSync(path.join(SKILL_DIR, "SKILL.md"))
+  ? SKILL_DIR
+  : REPO_ROOT;
+
+// Real path of p, resolving symlinks in the part of it that already exists.
+function realpathLoose(p) {
+  const abs = path.resolve(p);
+  const rest = [];
+  let cur = abs;
+  while (!fs.existsSync(cur)) {
+    rest.unshift(path.basename(cur));
+    const parent = path.dirname(cur);
+    if (parent === cur) break;
+    cur = parent;
+  }
+  return path.join(fs.realpathSync(cur), ...rest);
+}
+
+// Every real directory the copy will walk, following symlinks (skill/board
+// points at ../board).
+function sourceDirs(src, seen = new Set()) {
+  const real = fs.realpathSync(src);
+  if (seen.has(real) || !fs.statSync(real).isDirectory()) return seen;
+  seen.add(real);
+  for (const entry of fs.readdirSync(real)) {
+    sourceDirs(path.join(real, entry), seen);
+  }
+  return seen;
+}
+
+// A --copy destination inside the source tree would copy itself into itself
+// until ENAMETOOLONG. Check before --force deletes anything.
+if (has("--copy")) {
+  const dirs = sourceDirs(srcToUse);
+  for (let p = realpathLoose(dest); ; p = path.dirname(p)) {
+    if (dirs.has(p)) {
+      console.error(`\x1b[31mCopy destination is inside the source tree: ${dest}\x1b[0m`);
+      console.error("Choose a --dir outside " + fs.realpathSync(REPO_ROOT));
+      process.exit(1);
+    }
+    if (path.dirname(p) === p) break;
+  }
+}
+
 // Check if destination exists (or is a symlink)
 let exists = false;
 try {
@@ -68,14 +130,8 @@ if (exists) {
 
 fs.mkdirSync(root, { recursive: true });
 
-// Source to link / copy: prefer REPO_ROOT (so SKILL.md, board/, etc. are all present) or SKILL_DIR
-// If SKILL_DIR exists with SKILL.md and board/, use SKILL_DIR, else link REPO_ROOT
-const srcToUse = fs.existsSync(path.join(SKILL_DIR, "SKILL.md"))
-  ? SKILL_DIR
-  : REPO_ROOT;
-
 if (has("--copy")) {
-  fs.cpSync(srcToUse, dest, { recursive: true });
+  copyDereferenced(srcToUse, dest);
   console.log(`\x1b[32m✔ Copied ${SKILL_NAME} skill → ${dest}\x1b[0m`);
 } else {
   fs.symlinkSync(srcToUse, dest, "dir");

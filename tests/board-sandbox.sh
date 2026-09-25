@@ -236,6 +236,21 @@ if printf '%s\n' "$PLAN" | grep -q '/artifacts'; then
 fi
 pass "Bind plan covers control files and never artifacts/"
 
+# A data root that lives inside this repo must not be exposed through a bind of
+# one of its ancestors (e.g. the repo root, bound for imports).
+FIXTURE_TEAMS="$(cd "$REPO_ROOT" && pwd -P)/tests/fixtures/teams_board/.teams"
+FIXTURE_ARTIFACTS="$FIXTURE_TEAMS/demo/artifacts"
+[ -d "$FIXTURE_ARTIFACTS" ] || fail "fixture artifacts/ missing: $FIXTURE_ARTIFACTS"
+FIXTURE_PLAN=$("$LAUNCHER" --teams-root "$FIXTURE_TEAMS" --print-plan) ||
+  fail "run-sandboxed --print-plan failed for in-repo fixture"
+while IFS=$'\t' read -r kind path; do
+  [ "$kind" = "ro-bind" ] || continue
+  case "$FIXTURE_ARTIFACTS/" in
+    "$path"/*) fail "bind plan exposes artifacts/ via ancestor bind: $path" ;;
+  esac
+done <<< "$FIXTURE_PLAN"
+pass "Bind plan never binds an ancestor of artifacts/ for an in-repo data root"
+
 # --- Sandbox Profile & Kernel Isolation (macOS sandbox-exec) ---
 if ! command -v sandbox-exec >/dev/null 2>&1; then
   skip "sandbox-exec not available on this platform"

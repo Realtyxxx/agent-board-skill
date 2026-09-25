@@ -13,10 +13,10 @@ Python 3 stdlib only. Serves the frozen Unified Core JSON Contract:
 import argparse
 import json
 import os
-import re
 import sys
+import traceback
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Any, Dict, List, Optional
+from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 # Ensure package root is in sys.path so 'board' can be imported when
@@ -27,14 +27,13 @@ if _PKG_ROOT not in sys.path:
 
 try:
     from board.adapters import get_adapter
-    from board.adapters.base import clean_text, read_text, valid_name
+    from board.adapters.base import read_text, valid_name
 except (ImportError, ValueError):
     from adapters import get_adapter
-    from adapters.base import clean_text, read_text, valid_name
+    from adapters.base import read_text, valid_name
 
 BOARD_DIR = os.path.dirname(os.path.abspath(__file__))
-TEMPLATES_INDEX = os.path.join(BOARD_DIR, "templates", "index.html")
-DIRECT_INDEX = os.path.join(BOARD_DIR, "index.html")
+INDEX_HTML = os.path.join(BOARD_DIR, "templates", "index.html")
 
 
 class BoardHandler(BaseHTTPRequestHandler):
@@ -71,9 +70,7 @@ class BoardHandler(BaseHTTPRequestHandler):
 
         if path == "/":
             # Read index.html dynamically
-            html = read_text(TEMPLATES_INDEX, limit=1 << 22)
-            if html is None:
-                html = read_text(DIRECT_INDEX, limit=1 << 22)
+            html = read_text(INDEX_HTML, limit=1 << 22)
             if html is None:
                 self._send(
                     503,
@@ -121,8 +118,11 @@ class BoardHandler(BaseHTTPRequestHandler):
             try:
                 payload = self.adapter.load_board(requested)
                 self._json(200, payload)
-            except Exception as e:
-                self._json(500, {"error": "internal_error", "message": str(e)})
+            except Exception:
+                # Details go to the server log only; exception text can carry
+                # file paths or file contents.
+                traceback.print_exc(file=sys.stderr)
+                self._json(500, {"error": "internal_error"})
             return
 
         self._json(404, {"error": "not_found"})
@@ -196,10 +196,10 @@ def main(argv=None):
             "local-only.",
             file=sys.stderr,
         )
+    adapter_name = adapter.__class__.__name__
     print(
-        f"agent-board listening on http://{
-            args.host}:{assigned_port} (root={root_dir}, adapter={
-            adapter.__class__.__name__})",
+        f"agent-board listening on http://{args.host}:{assigned_port} "
+        f"(root={root_dir}, adapter={adapter_name})",
         flush=True,
     )
 
